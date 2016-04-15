@@ -5,79 +5,94 @@
 # This file contains the complex structures stored in Storm table
 # in order to checks integrity between exclusive options, provide defaults,
 # supports extensions (without changing DB format)
+import copy
 
-from globaleaks import LANGUAGES_SUPPORTED_CODES
 from globaleaks.models import Model
-from globaleaks.utils.utility import log
-from globaleaks.settings import GLSetting
+from globaleaks.settings import GLSettings
 
-from globaleaks.rest.errors import InvalidInputFormat, SubmissionFailFields
-
-from globaleaks.utils.utility import uuid4
 
 # Localized strings utility management
 
-class Rosetta:
+class Rosetta(object):
     """
     This Class can manage all the localized strings inside
     one Storm object. AKA: manage three language on a single
     stone. Hell fucking yeah, History!
     """
 
-    def __init__(self, attrs):
+    def __init__(self, keys):
         self._localized_strings = {}
-        self._localized_attrs = attrs
+        self._localized_keys = keys
 
     def acquire_storm_object(self, obj):
-        for attr in self._localized_attrs:
-            self._localized_strings[attr] = getattr(obj, attr)
+        self._localized_strings = {key: getattr(obj, key) for key in self._localized_keys}
 
     def acquire_multilang_dict(self, obj):
-        for attr in self._localized_attrs:
-            self._localized_strings[attr] = obj[attr]
+        self._localized_strings = {}
+        for key in self._localized_keys:
+            value = obj[key] if key in obj else ''
+            self._localized_strings[key] = value
 
     def singlelang_to_multilang_dict(self, obj, language):
         ret = {}
-        for attr in self._localized_attrs:
-            ret[attr] = {}
-            ret[attr][language] = obj[attr]
+        for key in self._localized_keys:
+            value = {language: obj[key]} if key in obj else {language: ''}
+            ret[key] = value
         return ret
 
-    def dump_localized_attr(self, attr, language):
-        default_language = GLSetting.memory_copy.default_language
+    def dump_localized_key(self, key, language):
+        default_language = GLSettings.memory_copy.default_language
 
-        if attr not in self._localized_strings:
-            return "!! Missing value for '%s'" % attr
+        if key not in self._localized_strings:
+            return ""
 
-        translated_dict = self._localized_strings[attr]
+        translated_dict = self._localized_strings[key]
 
-        if translated_dict.has_key(language):
+        if not isinstance(translated_dict, dict):
+            return ""
+
+        if language is None:
+            # When language is None we export the full language dictionary
+            return translated_dict
+        elif language in translated_dict:
             return translated_dict[language]
-        elif translated_dict.has_key(default_language):
+        elif default_language in translated_dict:
             return translated_dict[default_language]
         else:
             return ""
 
-def fill_localized_keys(dictionary, attrs, language):
-    mo = Rosetta(attrs)
 
-    multilang_dict = mo.singlelang_to_multilang_dict(dictionary, language)
-
-    for attr in attrs:
-        dictionary[attr] = multilang_dict[attr]
+def fill_localized_keys(dictionary, keys, language):
+    if language is not None:
+        mo = Rosetta(keys)
+        multilang_dict = mo.singlelang_to_multilang_dict(dictionary, language)
+        dictionary.update({key: multilang_dict[key] for key in keys})
 
     return dictionary
 
-def get_localized_values(dictionary, obj, attrs, language):
-    mo = Rosetta(attrs)
+
+def get_localized_values(dictionary, obj, keys, language):
+    mo = Rosetta(keys)
 
     if isinstance(obj, dict):
         mo.acquire_multilang_dict(obj)
     elif isinstance(obj, Model):
         mo.acquire_storm_object(obj)
 
-    for attr in attrs:
-        dictionary[attr] = mo.dump_localized_attr(attr, language)
+    if language is not None:
+        dictionary.update({key: mo.dump_localized_key(key, language) for key in keys})
+    else:
+        for key in keys:
+            value = mo._localized_strings[key] if key in mo._localized_strings else ''
+            dictionary.update({key: value})
 
     return dictionary
 
+
+def get_raw_request_format(request, localized_strings):
+    ret = copy.deepcopy(request)
+
+    for ls in localized_strings:
+        ret[ls] = dict
+
+    return ret

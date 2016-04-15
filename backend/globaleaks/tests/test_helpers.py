@@ -1,19 +1,17 @@
+# -*- coding: utf-8 -*-
 """
 Testandi ipsos testes.
 """
-from __future__ import unicode_literals
 
 import json
+
 import os
-
 from twisted.internet.defer import inlineCallbacks
-
 from globaleaks import models
 from globaleaks.tests import helpers
 
 
 class TestFixtures(helpers.TestGL):
-
     @inlineCallbacks
     def test_import_fixture(self):
         """
@@ -22,7 +20,6 @@ class TestFixtures(helpers.TestGL):
         for root, dirs, files in os.walk(helpers.FIXTURES_PATH):
             for fixture in files:
                 yield helpers.import_fixture(fixture)
-                # XXX. what exately we do test here?
 
     def test_export_fixture(self):
         """

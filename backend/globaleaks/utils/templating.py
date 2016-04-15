@@ -8,344 +8,459 @@
 # supporter KeyWords are here documented:
 # https://github.com/globaleaks/GlobaLeaks/wiki/Customization-guide#customize-notification
 
-from globaleaks.settings import GLSetting
-from globaleaks.utils.utility import (ISO8601_to_pretty_str,
-                                      ISO8601_to_pretty_str_tz,
-                                      log,
-                                      dump_file_list, dump_submission_steps)
+import copy
 
-class Templating:
+import collections
 
-    def format_template(self, raw_template, event_dicts):
-        """
-        TODO research on integration of http://docs.python.org/2/library/email
-        """
+from globaleaks import models
+from globaleaks.rest import errors
+from globaleaks.settings import GLSettings
+from globaleaks.utils.utility import ISO8601_to_pretty_str, ISO8601_to_day_str, \
+    ISO8601_to_datetime, datetime_now, bytes_to_pretty_str
 
-        supported_event_types = { u'encrypted_tip' : EncryptedTipKeyword,
-                                  u'plaintext_tip' : TipKeyword,
-                                  # different events, some classes
-                                  u'encrypted_expiring_tip' : EncryptedTipKeyword,
-                                  u'plaintext_expiring_tip' : TipKeyword,
-                                  u'encrypted_file' : EncryptedFileKeyword,
-                                  u'plaintext_file' : FileKeyword,
-                                  u'encrypted_comment' : EncryptedCommentKeyword,
-                                  u'plaintext_comment' : CommentKeyword,
-                                  u'encrypted_message' : EncryptedMessageKeyword,
-                                  u'plaintext_message' : MessageKeyword,
-                                  u'zip_collection' : ZipFileKeyword
-                                }
-
-        if event_dicts.type not in supported_event_types.keys():
-            raise AssertionError("%s at the moment supported: [%s] is NOT " %
-                                 (supported_event_types.keys(), event_dicts.type))
-
-        # For each Event type, we've to dispatch the right _KeyWord class
-        TemplatClass = supported_event_types[event_dicts.type]
-        keyword_converter = TemplatClass(event_dicts.node_info, event_dicts.context_info,
-                                         event_dicts.steps_info, event_dicts.receiver_info,
-                                         event_dicts.trigger_info, event_dicts.trigger_parent)
-        # Each event has the same initializer, also if trigger_info differs :)
-
-        # we've now:
-        # 1) template => directly from Notification.*_template
-        # 2) keyword_converter => object aligned with Event type and data
-
-        for kw in keyword_converter.keyword_list:
-
-            if raw_template.count(kw):
-                # if %SomeKeyword% matches, call keyword_converter.SomeKeyword function
-                variable_content = getattr(keyword_converter, kw[1:-1])()
-                raw_template = raw_template.replace(kw, variable_content)
-
-        # Is no more Raw, because all the keywords that shall be converted in
-        # the Event.type, has been converted. So if you have request %TipFields% in
-        # a Comment notification template, you would get just a message with a not
-        # converted keyword.
-        return raw_template
+node_keywords = [
+    '%NodeName%',
+    '%HiddenService%',
+    '%PublicSite%',
+]
 
 
+tip_keywords = [
+    '%TipID%',
+    '%TipTorURL%',
+    '%TipT2WURL%',
+    '%TorURL%',
+    '%T2WURL%',
+    '%TipNum%',
+    '%TipLabel%',
+    '%EventTime%',
+    '%SubmissionDate%',
+    '%ExpirationDate%',
+    '%ExpirationWatch%',
+    '%RecipientName%',
+    '%ContextName%'
+]
 
-# Below you can see an inheritance dance!¹!!eleven!
+file_keywords = [
+    '%FileName%',
+    '%FileSize%',
+    '%FileType%'
+]
 
-class _KeyWord(object):
+export_template_keywords = [
+    '%QuestionnaireAnswers%',
+    '%Comments%',
+    '%Messages%'
+]
+
+export_message_keywords = [
+    '%Content%'
+]
+
+admin_pgp_alert_keywords = [
+    '%PGPKeyInfoList%'
+]
+
+user_pgp_alert_keywords = [
+    '%PGPKeyInfo%'
+]
+
+admin_anomaly_keywords = [
+    '%AnomalyDetailDisk%',
+    '%AnomalyDetailActivities%',
+    '%ActivityAlarmLevel%',
+    '%ActivityDump%',
+    '%NodeName%',
+    '%FreeMemory%',
+    '%TotalMemory%'
+]
+
+
+def indent(n=1):
+    return '  ' * n
+
+
+def indent_text(text, n=1):
     """
-    This class define the base keyword list supported by all the events,
-    in example, %NodeName% is a keyword always available. Other keywords can
-    be used only in specific Event.
+    Add n * 2 space as indentation to each of the non empty lines of the provided text
     """
+    return '\n'.join([('  ' * n if not l.isspace() else '') + l for l in text.splitlines()])
 
-    shared_keywords = [
-        '%NodeName%',
-        '%HiddenService%',
-        '%PublicSite%',
-        '%ReceiverName%',
-        '%ContextName%',
-        '%NodeSignature%'
-    ]
 
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc):
+def dump_field_entry(output, field, entry, indent_n):
+    field_type = field['type']
+    if field_type == 'checkbox':
+        for k, v in entry.iteritems():
+            for option in field['options']:
+                if k == option.get('id', '') and v == 'True':
+                    output += indent(indent_n) + option['label'] + '\n'
+    elif field_type in ['selectbox', 'multichoice']:
+        for option in field['options']:
+            if entry.get('value', '') == option['id']:
+                output += indent(indent_n) + option['label'] + '\n'
+    elif field_type == 'date':
+        output += indent(indent_n) + ISO8601_to_pretty_str(entry.get('value', '')) + '\n'
+    elif field_type == 'tos':
+        answer = '☑' if entry.get('value', '') == 'True' else '☐'
+        output += indent(indent_n) + answer + '\n'
+    elif field_type == 'fieldgroup':
+        output = dump_fields(output, field['children'], entry, indent_n)
+    else:
+        output += indent_text(entry.get('value', ''), indent_n) + '\n'
 
-        self.keyword_list = _KeyWord.shared_keywords
+    return output + '\n'
 
-        self.node = node_desc
-        self.context = context_desc
-        self.fields = fields_desc
-        self.receiver = receiver_desc
+
+def dump_fields(output, fields, answers, indent_n):
+    rows = {}
+    for f in fields:
+        y = f['y']
+        if y not in rows:
+            rows[y] = []
+        rows[y].append(f)
+
+    rows = collections.OrderedDict(sorted(rows.items()))
+
+    for r in rows:
+        rows[r] = sorted(rows[r], key=lambda k: k['x'])
+
+    for index_x, row in rows.iteritems():
+        for field in row:
+            if field['type'] != 'fileupload' and field['id'] in answers:
+                output += indent(indent_n) + field['label'] + '\n'
+                entries = answers[field['id']]
+                if len(entries) == 1:
+                    output = dump_field_entry(output, field, entries[0], indent_n + 1)
+                else:
+                    i = 1
+                    for entry in entries:
+                        output += indent(indent_n) + '#' + str(i) + '\n'
+                        output = dump_field_entry(output, field, entry, indent_n + 2)
+                        i += 1
+
+    return output
+
+
+def dump_questionnaire_answers(questionnaire, answers):
+    output = ''
+
+    try:
+        questionnaire = sorted(questionnaire, key=lambda k: k['presentation_order'])
+    except:
+        pass
+
+    for step in questionnaire:
+        output += step['label'] + '\n'
+        output = dump_fields(output, step['children'], answers, 1) +'\n'
+
+    return output
+
+
+class Keyword(object):
+    """
+    This class define the base keyword list supported by all the events
+    """
+    keyword_list = node_keywords
+    data_keys = ['node', 'notification']
+
+    def __init__(self, data):
+        # node and notification are always injected as they contain general information
+        for k in self.data_keys:
+            if k not in data:
+                raise errors.InternalServerError('Missing key \'%s\' while resolving template \'%s\'' % (k, type(self).__name__))
+
+        self.data = data
 
     def NodeName(self):
-        return self.node['name']
+        return self.data['node']['name']
 
     def HiddenService(self):
-        return self.node['hidden_service']
+        return self.data['node']['hidden_service']
 
     def PublicSite(self):
-        return self.node['public_site']
+        return self.data['node']['public_site']
 
-    def ReceiverName(self):
-        return self.receiver['name']
 
-    def ContextName(self):
-        return self.context['name']
+class TipKeyword(Keyword):
+    keyword_list = Keyword.keyword_list + tip_keywords
+    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip']
 
-    def NodeSignature(self):
-        # FIXME currently the NodeSignature is mapped on node name;
-        # in future we could evaluate to introduce a different
-        # variable to permit better customizations.
-        return self.node['name']
-
-class TipKeyword(_KeyWord):
-
-    tip_keywords = [
-        '%TipTorURL%',
-        '%TipT2WURL%',
-        '%TipNum%',
-        '%EventTime%'
-    ]
-
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, tip_desc, *x):
-
-        super(TipKeyword, self).__init__(node_desc, context_desc,
-                                         fields_desc, receiver_desc)
-
-        self.keyword_list += TipKeyword.tip_keywords
-        self.tip = tip_desc
-        assert isinstance(self.tip, dict)
+    def TipID(self):
+        return self.data['tip']['id']
 
     def TipTorURL(self):
-        if len(self.node['hidden_service']):
-            retstr = '%s/#/status/%s' % (self.node['hidden_service'], self.tip['id'])
+        hidden_service = self.data['node']['hidden_service']
+
+        if len(hidden_service):
+            retstr = '%s/#/status/%s' % (hidden_service, self.data['tip']['id'])
         else:
-            retstr = 'ADMIN, CONFIGURE YOUR HIDDEN SERVICE (Advanced configuration)!'
+            retstr = '[NOT CONFIGURED]'
+
         return retstr
 
     def TipT2WURL(self):
-        """
-        we shall enhance this issue:
-        https://github.com/globaleaks/GlobaLeaks/issues/268
-        making that if one of these function return None, the entire line is stripped.
-        This can avoid the awkward effect of 'Public Url: [Ask to your admin about Tor]'
-        """
-        if not GLSetting.memory_copy.tor2web_receiver:
-            retstr = "[Ask to your admin about Tor]"
-        elif len(self.node['public_site']):
-            retstr =  '%s/#/status/%s' % ( self.node['public_site'], self.tip['id'] )
+        public_site = self.data['node']['public_site']
+
+        if not GLSettings.memory_copy.accept_tor2web_access['receiver']:
+            retstr = 'DISABLED'
+        elif len(public_site):
+            retstr =  '%s/#/status/%s' % (public_site, self.data['tip']['id'])
         else:
-            retstr = 'ADMIN, CONFIGURE YOUR PUBLIC SITE (Advanced configuration)!'
+            retstr = '[NOT CONFIGURED]'
 
         return retstr
 
-    def TipNum(self):
-        """
-        This is just an hack to create a random number from a TipId,
-        from 1 to 1000, that shall be the same among time, and
-        (without caring on collisions) different from others Tips
-        """
-        uuid_derived_string = self.tip['id'].replace('-', '')
-        retval = 1
-        for x in xrange(len(uuid_derived_string)):
-            try:
-                retval += int(uuid_derived_string[x])
-            except Exception:
-                # this happen when an ascii letter is converted
-                retval *= 2
+    def TorURL(self):
+        return self.TipTorURL()
 
-        retval = (retval % 1000) + 1
-        return unicode(retval)
+    def T2WURL(self):
+        return self.TipT2WURL()
+
+    def TipNum(self):
+        return self.data['tip']['sequence_number']
+
+    def TipLabel(self):
+        return self.data['tip']['label']
 
     def EventTime(self):
-        return ISO8601_to_pretty_str_tz(self.tip['creation_date'], float(self.receiver['timezone']))
+        return ISO8601_to_pretty_str(self.data['tip']['creation_date'], float(self.data['receiver']['timezone']))
 
+    def SubmissionDate(self):
+        return self.EventTime()
 
-class EncryptedTipKeyword(TipKeyword):
+    def ExpirationDate(self):
+        # is not time zone dependent, is UTC for everyone
+        return ISO8601_to_day_str(self.data['tip']['expiration_date'], float(self.data['receiver']['timezone']))
 
-    encrypted_tip_keywords = [
-        '%TipFields%'
-    ]
+    def ExpirationWatch(self):
+        missing_time = ISO8601_to_datetime(self.data['tip']['expiration_date']) - datetime_now()
+        missing_hours = int(divmod(missing_time.total_seconds(), 3600)[0])
+        return str(missing_hours)
 
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, tip_desc, *x):
+    def ContextName(self):
+        return self.data['context']['name']
 
-        super(EncryptedTipKeyword, self).__init__(node_desc, context_desc, fields_desc,
-                                                  receiver_desc, tip_desc, None)
-        self.keyword_list += EncryptedTipKeyword.encrypted_tip_keywords
-
-    def TipFields(self):
-        return dump_submission_steps(self.tip['wb_steps'])
+    def RecipientName(self):
+        return self.data['receiver']['name']
 
 
 class CommentKeyword(TipKeyword):
-
-    comment_keywords = [
-        '%CommentSource%',
-        '%EventTime%'
-    ]
-
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, comment_desc, tip_desc):
-
-        super(CommentKeyword, self).__init__(node_desc, context_desc, fields_desc, receiver_desc, tip_desc)
-
-        self.keyword_list += CommentKeyword.comment_keywords
-        self.comment = comment_desc
-
-    def CommentSource(self):
-        return self.comment['type']
+    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'comment']
 
     def EventTime(self):
-        return ISO8601_to_pretty_str_tz(self.comment['creation_date'], float(self.receiver['timezone']))
-
-
-class EncryptedCommentKeyword(CommentKeyword):
-
-    encrypted_comment_keywords = [
-        '%CommentContent%',
-    ]
-
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, comment_desc, tip_desc):
-
-        super(EncryptedCommentKeyword, self).__init__(node_desc, context_desc, fields_desc,
-                                                      receiver_desc, comment_desc, tip_desc)
-        self.keyword_list += EncryptedCommentKeyword.encrypted_comment_keywords
-
-    def CommentContent(self):
-        """
-        Think about Comment.system_content before document and insert this
-        feature in the default templates
-        """
-        return self.comment['content']
+        return ISO8601_to_pretty_str(self.data['comment']['creation_date'], float(self.data['receiver']['timezone']))
 
 
 class MessageKeyword(TipKeyword):
-
-    message_keywords = [
-        '%MessageSource%',
-        '%EventTime%'
-    ]
-
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, message_desc, tip_desc):
-
-        super(MessageKeyword, self).__init__(node_desc, context_desc,
-                                             fields_desc, receiver_desc,
-                                             tip_desc)
-
-        self.keyword_list += MessageKeyword.message_keywords
-        self.message = message_desc
-
-    def MessageSource(self):
-        # well... it's obviously always WhistleBlower at the moment...
-        return self.message['author']
+    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'message']
 
     def EventTime(self):
-        return ISO8601_to_pretty_str_tz(self.message['creation_date'], float(self.receiver['timezone']))
-
-class EncryptedMessageKeyword(MessageKeyword):
-
-    encrypted_message_keywords = [
-        '%MessageContent%',
-    ]
-
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, message_desc, tip_desc):
-
-        super(EncryptedMessageKeyword, self).__init__(node_desc, context_desc,
-                                                      fields_desc, receiver_desc,
-                                                      message_desc, tip_desc)
-        self.keyword_list += EncryptedMessageKeyword.encrypted_message_keywords
-
-    def MessageContent(self):
-        return self.message['content']
+        return ISO8601_to_pretty_str(self.data['message']['creation_date'], float(self.data['receiver']['timezone']))
 
 
 class FileKeyword(TipKeyword):
-
-    file_keywords = [
-        '%FileName%',
-        '%EventTime%',
-        '%FileSize%',
-        '%FileType%'
-    ]
-
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, file_desc, tip_desc):
-
-        super(FileKeyword, self).__init__(node_desc, context_desc,
-                                          fields_desc, receiver_desc,
-                                          tip_desc)
-
-        self.keyword_list += FileKeyword.file_keywords
-        self.file = file_desc
+    keyword_list = TipKeyword.keyword_list + file_keywords
+    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'file']
 
     def FileName(self):
-        return self.file['name']
+        return self.data['file']['name']
 
     def EventTime(self):
-        return ISO8601_to_pretty_str_tz(self.file['creation_date'], float(self.receiver['timezone']))
+        return ISO8601_to_pretty_str(self.data['file']['creation_date'], float(self.data['receiver']['timezone']))
 
     def FileSize(self):
-        return self.file['size']
+        return str(self.data['file']['size'])
 
     def FileType(self):
-        return self.file['content_type']
+        return self.data['file']['content_type']
 
 
-class EncryptedFileKeyword(FileKeyword):
-    """
-    FileDescription not yet implemented in UI, but here has to go
-    """
+class ExportKeyword(TipKeyword):
+    keyword_list = TipKeyword.keyword_list + export_template_keywords
+    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'comments', 'messages', 'files']
 
-    encrypted_file_keywords = [
-        '%FileDescription%'
-    ]
+    def dump_messages(self, messages):
+        ret = ''
+        for message in messages:
+            data = copy.deepcopy(self.data)
+            data['type'] = 'export_message'
+            data['message'] = copy.deepcopy(message)
+            template = 'export_message_whistleblower' if (message['type'] == 'whistleblower') else 'export_message_recipient'
+            ret += indent_text('-' * 40) + '\n'
+            ret += indent_text(Templating().format_template(self.data['notification'][template], data).encode('utf-8')) + '\n\n'
 
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, file_desc, tip_desc):
+        return ret
 
-        super(EncryptedFileKeyword, self).__init__(node_desc, context_desc,
-                                                   fields_desc, receiver_desc,
-                                                   file_desc, tip_desc)
-        self.keyword_list += EncryptedFileKeyword.encrypted_file_keywords
+    def QuestionnaireAnswers(self):
+        return dump_questionnaire_answers(self.data['tip']['questionnaire'], self.data['tip']['answers'])
 
-    def FileDescription(self):
-        pass
+    def Comments(self):
+        if len(self.data['comments']) == 0:
+            return '%Blank%'
+
+        ret = self.data['node']['widget_comments_title'] + ':\n'
+        ret += self.dump_messages(self.data['comments']) + '\n'
+        return ret + '\n'
+
+    def Messages(self):
+        if len(self.data['messages']) == 0:
+            return '%Blank%'
+
+        ret = self.data['node']['widget_messages_title'] + ':\n'
+        ret += self.dump_messages(self.data['messages'])
+        return ret + '\n'
 
 
-class ZipFileKeyword(TipKeyword):
+class ExportMessageKeyword(TipKeyword):
+    keyword_list = TipKeyword.keyword_list + export_template_keywords + export_message_keywords
+    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'message']
 
-    zip_file_keywords = [
-        '%FileList%',
-        '%FilesNumber%',
-        '%TotalSize%'
-    ]
+    def Content(self):
+        return self.data['message']['content']
 
-    def __init__(self, node_desc, context_desc, fields_desc, receiver_desc, zip_desc, tip_desc):
 
-        super(ZipFileKeyword, self).__init__(node_desc, context_desc,
-                                             fields_desc, receiver_desc,
-                                             tip_desc)
+class AdminPGPAlertKeyword(Keyword):
+    keyword_list = Keyword.keyword_list + admin_pgp_alert_keywords
+    data_keys =  ['node', 'notification', 'users']
 
-        self.keyword_list += ZipFileKeyword.zip_file_keywords
-        self.zip = zip_desc
+    def PGPKeyInfoList(self):
+        ret = ''
+        for r in self.data['users']:
+            fingerprint = r['pgp_key_fingerprint']
+            key = fingerprint[:7] if fingerprint is not None else ''
 
-    def FileList(self):
-        return dump_file_list(self.zip['files'], self.zip['files_number'])
+            ret += '\t%s, %s (%s)\n' % (r['name'],
+                                        key,
+                                        ISO8601_to_day_str(r['pgp_key_expiration']))
+        return ret
 
-    def FilesNumber(self):
-        return str(self.zip['files_number'])
 
-    def TotalSize(self):
-        return str(self.zip['total_size'])
+class PGPAlertKeyword(Keyword):
+    keyword_list = Keyword.keyword_list + user_pgp_alert_keywords
+    data_keys =  ['node', 'notification', 'user']
+
+    def PGPKeyInfo(self):
+        fingerprint = self.data['user']['pgp_key_fingerprint']
+        key = fingerprint[:7] if fingerprint is not None else ''
+
+        return '\t0x%s (%s)' % (key, ISO8601_to_day_str(self.data['user']['pgp_key_expiration']))
+
+
+class AnomalyKeyword(Keyword):
+    keyword_list = Keyword.keyword_list + admin_anomaly_keywords
+    data_keys =  ['node', 'notification', 'alert']
+
+    def AnomalyDetailDisk(self):
+        # This happens all the time anomalies are present but disk is ok
+        if self.data['alert']['stress_levels']['disk_space'] == 0:
+            return u''
+
+        if self.data['alert']['stress_levels']['disk_space'] == 1:
+            return self.data['notification']['admin_anomaly_disk_low']
+        elif self.data['alert']['stress_levels']['disk_space'] == 2:
+            return self.data['notification']['admin_anomaly_disk_medium']
+        else:
+            return self.data['notification']['admin_anomaly_disk_high']
+
+    def AnomalyDetailActivities(self):
+        # This happens all the time there is not anomalous traffic
+        if self.data['alert']['stress_levels']['activity'] == 0:
+            return u''
+
+        return self.data['notification']['admin_anomaly_activities']
+
+    def ActivityAlarmLevel(self):
+        return '%s' % self.data['alert']['stress_levels']['activity']
+
+    def ActivityDump(self):
+        retstr = ''
+
+        for event, count in self.data['alert']['event_matrix'].iteritems():
+            if not count:
+                continue
+            retstr = '%s%s%d\n%s' % (event, (25 - len(event)) * ' ', count, retstr)
+
+        return retstr
+
+    def FreeMemory(self):
+        return '%s' % bytes_to_pretty_str(self.data['alert']['latest_measured_freespace'])
+
+    def TotalMemory(self):
+        return '%s' % bytes_to_pretty_str(self.data['alert']['latest_measured_totalspace'])
+
+
+supported_template_types = {
+    u'tip': TipKeyword,
+    u'comment': CommentKeyword,
+    u'message': MessageKeyword,
+    u'file': FileKeyword,
+    u'tip_expiration': TipKeyword,
+    u'pgp_alert': PGPAlertKeyword,
+    u'admin_pgp_alert': AdminPGPAlertKeyword,
+    u'receiver_notification_limit_reached': Keyword,
+    u'export_template': ExportKeyword,
+    u'export_message': ExportMessageKeyword,
+    u'admin_anomaly': AnomalyKeyword
+}
+
+
+class Templating(object):
+    def format_template(self, raw_template, data):
+        keyword_converter = supported_template_types[data['type']](data)
+        iterations = 3
+        stop = False
+        while (stop is False and iterations > 0):
+            iterations -= 1
+            count = 0
+
+            for kw in keyword_converter.keyword_list:
+                if raw_template.count(kw):
+                    # if %SomeKeyword% matches, call keyword_converter.SomeKeyword function
+                    variable_content = getattr(keyword_converter, kw[1:-1])()
+                    raw_template = raw_template.replace(kw, variable_content)
+
+                    count += 1
+
+            # remobe lines with only %Blank%
+            raw_template = raw_template.replace('\n%Blank%\n', '\n')
+
+            # remove remaining $Blank% tokens
+            raw_template = raw_template.replace('\n%Blank%\n', '')
+
+            if count == 0:
+                # finally!
+                stop = True
+                break
+
+        return raw_template
+
+    def get_mail_subject_and_body(self, data):
+        if data['type'] == 'export_template':
+            # this is currently the only template not used for mail notifications
+            pass
+        elif data['type'] in supported_template_types:
+            subject_template = data['notification'][data['type'] + '_mail_title']
+            body_template = data['notification'][data['type'] + '_mail_template']
+        else:
+            raise NotImplementedError('This data_type (%s) is not supported' % ['data.type'])
+
+        if data['type'] in [u'tip', u'comment', u'file', u'message', u'tip_expiration']:
+            prefix = '%TipNum% '
+            if data['tip']['label'] != '':
+                prefix += '[%TipLabel%] '
+
+            subject_template = prefix + subject_template
+
+        subject = self.format_template(subject_template, data)
+        body = self.format_template(body_template, data)
+
+        return subject, body
+
+    def db_prepare_mail(self, store, data):
+        subject, body = self.get_mail_subject_and_body(data)
+
+        mail = models.Mail({
+            'address': data['address'],
+            'subject': subject,
+            'body': body
+        })

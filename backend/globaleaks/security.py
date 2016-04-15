@@ -1,34 +1,134 @@
 # -*- coding: utf-8 -*-
 #
-#   security 
-#   ********
+# security
+# ********
 #
 # GlobaLeaks security functions
 
 import binascii
-import re
 import os
+import re
+import base64
+import json
+import random
 import shutil
 import scrypt
-import pickle
+import string
+import time
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-
+from datetime import datetime
 from gnupg import GPG
 from tempfile import _TemporaryFileWrapper
 
 from globaleaks.rest import errors
-from globaleaks.utils.utility import log, acquire_bool
-from globaleaks.settings import GLSetting
-from globaleaks.models import *
-from globaleaks.third_party.rstr import xeger
+from globaleaks.utils.utility import log, datetime_to_day_str
+from globaleaks.settings import GLSettings
 
-
-SALT_LENGTH = (128 / 8) # 128 bits of unique salt
 
 crypto_backend = default_backend()
+
+def sha256(data):
+    h = hashes.Hash(hashes.SHA256(), backend=crypto_backend)
+    h.update(data)
+    return binascii.b2a_hex(h.finalize())
+
+
+def sha512(data):
+    h = hashes.Hash(hashes.SHA512(), backend=crypto_backend)
+    h.update(data)
+    return binascii.b2a_hex(h.finalize())
+
+
+def generateRandomReceipt():
+    """
+    Return a random receipt of 16 digits
+    """
+    return ''.join(random.SystemRandom().choice(string.digits) for _ in range(16)).encode('utf-8')
+
+
+def generateRandomKey(N):
+    """
+    Return a random key of N characters in a-zA-Z0-9
+    """
+    return ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(N)).encode('utf-8')
+
+
+def generateRandomSalt():
+    """
+    Return a base64 encoded string with 128 bit of entropy
+    """
+    return base64.b64encode(os.urandom(16))
+
+
+def generateRandomPassword():
+    """
+    Return a random password of 10 characters in a-zA-Z0-9
+    """
+    return generateRandomKey(10)
+
+
+def _overwrite(absolutefpath, pattern):
+    filesize = os.path.getsize(absolutefpath)
+    bytecnt = 0
+    with open(absolutefpath, 'w+') as f:
+        f.seek(0)
+        while bytecnt < filesize:
+            f.write(pattern)
+            bytecnt += len(pattern)
+
+
+def overwrite_and_remove(absolutefpath, iterations_number=1):
+    """
+    Overwrite the file with all_zeros, all_ones, random patterns
+
+    Note: At each iteration the original size of the file is altered.
+    """
+    if random.randint(1, 5) == 3:
+        # "never let attackers do assumptions"
+        iterations_number += 1
+
+    log.debug("Starting secure deletion of file %s" % absolutefpath)
+
+    try:
+        # in the following loop, the file is open and closed on purpose, to trigger flush operations
+        all_zeros = "\0\0\0\0" * 1024               # 4kb of zeros
+        all_ones = "FFFFFFFF".decode("hex") * 1024  # 4kb of ones
+
+        for iteration in xrange(iterations_number):
+            OPTIMIZATION_RANDOM_BLOCK = 4096 + random.randint(1, 4096)
+
+            random_pattern = ""
+            for i in xrange(OPTIMIZATION_RANDOM_BLOCK):
+                random_pattern += str(random.randrange(256))
+
+            log.debug("Excecuting rewrite iteration (%d out of %d)" %
+                      (iteration, iterations_number))
+
+            _overwrite(absolutefpath, all_zeros)
+            log.debug("Overwritten file %s with all zeros pattern" % absolutefpath)
+
+            _overwrite(absolutefpath, all_ones)
+            log.debug("Overwritten file %s with all ones pattern" % absolutefpath)
+
+            _overwrite(absolutefpath, random_pattern)
+            log.debug("Overwritten file %s with random pattern" % absolutefpath)
+
+    except Exception as e:
+        log.err("Unable to perform secure overwrite for file %s: %s" %
+                (absolutefpath, e))
+
+    finally:
+        try:
+            os.remove(absolutefpath)
+        except OSError as remove_ose:
+            log.err("Unable to perform unlink operation on file %s: %s" %
+                    (absolutefpath, remove_ose))
+
+    log.debug("Performed deletion of file file: %s" % absolutefpath)
+
 
 class GLSecureTemporaryFile(_TemporaryFileWrapper):
     """
@@ -36,15 +136,16 @@ class GLSecureTemporaryFile(_TemporaryFileWrapper):
     You can't use this File object like a normal file object,
     check .read and .write!
     """
-
     last_action = 'init'
 
     def __init__(self, filedir):
         """
-        filedir: dir target to keep GL.
+        filedir: directory where to store files
         """
+        self.creation_date = time.time()
 
         self.create_key()
+        self.encryptor_finalized = False
 
         # XXX remind enhance file name with incremental number
         self.filepath = os.path.join(filedir, "%s.aes" % self.key_id)
@@ -65,29 +166,29 @@ class GLSecureTemporaryFile(_TemporaryFileWrapper):
         """
         Create the AES Key to encrypt uploaded file.
         """
-        self.key = os.urandom(GLSetting.AES_key_size)
+        self.key = os.urandom(GLSettings.AES_key_size)
 
-        self.key_id = xeger(GLSetting.AES_key_id_regexp)
-        self.keypath = os.path.join(GLSetting.ramdisk_path, "%s%s" %
-                                    (GLSetting.AES_keyfile_prefix, self.key_id))
+        self.key_id = generateRandomKey(16)
+        self.keypath = os.path.join(GLSettings.ramdisk_path, "%s%s" %
+                                    (GLSettings.AES_keyfile_prefix, self.key_id))
 
         while os.path.isfile(self.keypath):
-            self.key_id = xeger(GLSetting.AES_key_id_regexp)
-            self.keypath = os.path.join(GLSetting.ramdisk_path, "%s%s" %
-                                    (GLSetting.AES_keyfile_prefix, self.key_id))
+            self.key_id = generateRandomKey(16)
+            self.keypath = os.path.join(GLSettings.ramdisk_path, "%s%s" %
+                                        (GLSettings.AES_keyfile_prefix, self.key_id))
 
-        self.key_counter_nonce = os.urandom(GLSetting.AES_counter_nonce)
+        self.key_counter_nonce = os.urandom(GLSettings.AES_counter_nonce)
         self.initialize_cipher()
 
-        saved_struct = {
-            'key' : self.key,
-            'key_counter_nonce' : self.key_counter_nonce
+        key_json = {
+            'key': base64.b64encode(self.key),
+            'key_counter_nonce': base64.b64encode(self.key_counter_nonce)
         }
 
         log.debug("Key initialization at %s" % self.keypath)
 
         with open(self.keypath, 'w') as kf:
-           pickle.dump(saved_struct, kf)
+            json.dump(key_json, kf)
 
         if not os.path.isfile(self.keypath):
             log.err("Unable to write keyfile %s" % self.keypath)
@@ -102,9 +203,8 @@ class GLSecureTemporaryFile(_TemporaryFileWrapper):
         The last action is kept track because the internal status
         need to track them. read below read()
         """
-
         assert (self.last_action != 'read'), "you can write after read!"
-        
+
         self.last_action = 'write'
         try:
             if isinstance(data, unicode):
@@ -116,35 +216,57 @@ class GLSecureTemporaryFile(_TemporaryFileWrapper):
             raise wer
 
     def close(self):
-        if any(x in self.file.mode for x in 'wa') and not self.close_called:
-            self.file.write(self.encryptor.finalize())
-        return _TemporaryFileWrapper.close(self)
+        if not self.close_called:
+            try:
+                if any(x in self.file.mode for x in 'wa') and not self.encryptor_finalized:
+                    self.encryptor_finalized = True
+                    self.file.write(self.encryptor.finalize())
+
+            except:
+                pass
+
+            finally:
+                if self.delete:
+                    os.remove(self.keypath)
+
+        try:
+            _TemporaryFileWrapper.close(self)
+        except:
+            pass
 
     def read(self, c=None):
         """
-        The first time 'read' is called after a write, is automatically seek(0)
+        The first time 'read' is called after a write, seek(0) is performed
         """
         if self.last_action == 'write':
-            self.seek(0, 0) # this is a trick just to misc write and read
+            if any(x in self.file.mode for x in 'wa') and not self.encryptor_finalized:
+                self.encryptor_finalized = True
+                self.file.write(self.encryptor.finalize())
+
+            self.seek(0, 0)  # this is a trick just to misc write and read
             self.initialize_cipher()
             log.debug("First seek on %s" % self.filepath)
             self.last_action = 'read'
 
+        data = None
         if c is None:
-            return self.decryptor.update(self.file.read())
+            data = self.file.read()
         else:
-            return self.decryptor.update(self.file.read(c))
+            data = self.file.read(c)
+
+        if len(data):
+            return self.decryptor.update(data)
+        else:
+            return self.decryptor.finalize()
 
 
 class GLSecureFile(GLSecureTemporaryFile):
-
     def __init__(self, filepath):
-
         self.filepath = filepath
 
         self.key_id = os.path.basename(self.filepath).split('.')[0]
 
-        log.debug("Opening secure file %s with %s" % (self.filepath, self.key_id) )
+        log.debug("Opening secure file %s with %s" % (self.filepath, self.key_id))
 
         self.file = open(self.filepath, 'r+b')
 
@@ -157,14 +279,14 @@ class GLSecureFile(GLSecureTemporaryFile):
         """
         Load the AES Key to decrypt uploaded file.
         """
-        self.keypath = os.path.join(GLSetting.ramdisk_path, ("%s%s" % (GLSetting.AES_keyfile_prefix, self.key_id)))
+        self.keypath = os.path.join(GLSettings.ramdisk_path, ("%s%s" % (GLSettings.AES_keyfile_prefix, self.key_id)))
 
         try:
             with open(self.keypath, 'r') as kf:
-                saved_struct = pickle.load(kf)
+                key_json = json.load(kf)
 
-            self.key = saved_struct['key']
-            self.key_counter_nonce = saved_struct['key_counter_nonce']
+            self.key = base64.b64decode(key_json['key'])
+            self.key_counter_nonce = base64.b64decode(key_json['key_counter_nonce'])
             self.initialize_cipher()
 
         except Exception as axa:
@@ -177,7 +299,6 @@ def directory_traversal_check(trusted_absolute_prefix, untrusted_path):
     """
     check that an 'untrusted_path' match a 'trusted_absolute_path' prefix
     """
-
     if not os.path.isabs(trusted_absolute_prefix):
         raise Exception("programming error: trusted_absolute_prefix is not an absolute path: %s" %
                         trusted_absolute_prefix)
@@ -191,39 +312,18 @@ def directory_traversal_check(trusted_absolute_prefix, untrusted_path):
         raise errors.DirectoryTraversalError
 
 
-def get_salt(salt_input):
+def hash_password(password, salt):
     """
-    @param salt_input:
-        A string
-
-    is performed a SHA512 hash of the salt_input string, and are returned 128bits
-    of uniq data, converted in
-    """
-    sha = hashes.Hash(hashes.SHA512(), backend=crypto_backend)
-    sha.update(salt_input.encode('utf-8'))
-    # hex require two byte each to describe 1 byte of entropy
-    h = sha.finalize()
-    digest = binascii.b2a_hex(h)
-    return digest[:SALT_LENGTH * 2]
-
-
-def hash_password(proposed_password, salt_input):
-    """
-    @param proposed_password: a password, not security enforced.
-        is not accepted an empty string.
+    @param password: a password
+    @param salt: a password salt
 
     @return:
-        the scrypt hash in base64 of the password
+        the salted scrypt hash of the provided password
     """
-    proposed_password = proposed_password.encode('utf-8')
-    salt = get_salt(salt_input)
+    password = password.encode('utf-8')
+    salt = salt.encode('utf-8')
 
-    if not len(proposed_password):
-        log.err("password string has been not really provided (0 len)")
-        raise errors.InvalidInputFormat("Missing password")
-
-    hashed_passwd = scrypt.hash(proposed_password, salt)
-    return binascii.b2a_hex(hashed_passwd)
+    return scrypt.hash(password, salt).encode('hex')
 
 
 def check_password_format(password):
@@ -241,214 +341,135 @@ def check_password_format(password):
         raise errors.InvalidInputFormat("password requirements unmet")
 
 
-def check_password(guessed_password, base64_stored, salt_input):
-    guessed_password = guessed_password.encode('utf-8')
-    salt = get_salt(salt_input)
-
-    hashed_guessed = scrypt.hash(guessed_password, salt)
-
-    return binascii.b2a_hex(hashed_guessed) == base64_stored
+def check_password(guessed_password, salt, password_hash):
+    return hash_password(guessed_password, salt) == password_hash
 
 
-def change_password(base64_stored, old_password, new_password, salt_input):
+def change_password(old_password_hash, old_password, new_password, salt):
     """
-    @param old_password: The old password in string, expected to be the same.
-        If you're workin in Administrative context, just use set_receiver_password
-        and override the old one.
-
-    @param base64_stored:
-    @param salt_input:
-        You're fine with these
-
-    @param new_password:
-        Not security enforced, if wanted, need to be client or handler checked
+    @param old_password_hash: the stored password hash.
+    @param old_password: The user provided old password for password change protection.
+    @param new_password: The user provided new password.
+    @param salt: The salt to be used for password hashing.
 
     @return:
         the scrypt hash in base64 of the new password
     """
-    if not check_password(old_password, base64_stored, salt_input):
-        log.err("change_password_error: provided invalid old_password")
+    if not check_password(old_password, salt, old_password_hash):
+        log.err("change_password(): Error - provided invalid old_password")
         raise errors.InvalidOldPassword
 
     check_password_format(new_password)
 
-    return hash_password(new_password, salt_input)
+    return hash_password(new_password, salt)
 
 
-class GLBGPG:
+class GLBPGP(object):
     """
-    GPG has not a dedicated class, because one of the function is called inside a transact, and
+    PGP has not a dedicated class, because one of the function is called inside a transact, and
     I'm not quite confident on creating an object that operates on the filesystem knowing
     that would be run also on the Storm cycle.
     """
-
-    def __init__(self, receiver_desc):
+    def __init__(self):
         """
         every time is needed, a new keyring is created here.
         """
-        if receiver_desc.has_key('gpg_key_status') and \
-                        receiver_desc['gpg_key_status'] != Receiver._gpg_types[1]: # Enabled
-            log.err("Requested GPG initialization for a receiver without GPG configured! %s" %
-                    receiver_desc['username'])
-            raise Exception("Requested GPG init for user without GPG [%s]" % receiver_desc['username'])
-
         try:
-            temp_gpgroot = os.path.join(GLSetting.gpgroot, "%s" % xeger(r'[A-Za-z0-9]{8}'))
-            os.makedirs(temp_gpgroot, mode=0700)
-            self.gpgh = GPG(gnupghome=temp_gpgroot, options=['--trust-model', 'always'])
+            temp_pgproot = os.path.join(GLSettings.pgproot, "%s" % generateRandomKey(8))
+            os.makedirs(temp_pgproot, mode=0700)
+            self.pgph = GPG(gnupghome=temp_pgproot, options=['--trust-model', 'always'])
+            self.pgph.encoding = "UTF-8"
+        except OSError as ose:
+            log.err("Critical, OS error in operating with GnuPG home: %s" % ose)
+            raise
         except Exception as excep:
-            log.err("Unable to instance GPG object: %s" % excep)
-            raise excep
+            log.err("Unable to instance PGP object: %s" % excep)
+            raise
 
-        self.receiver_desc = receiver_desc
-        log.debug("GPG object initialized for receiver %s" % receiver_desc['username'])
-
-    def sanitize_gpg_string(self, received_gpgasc):
+    def load_key(self, key):
         """
-        @param received_gpgasc: A gpg armored key
-        @return: Sanitized string or raise InvalidInputFormat
-
-        This function validate the integrity of a GPG key
-        """
-        lines = received_gpgasc.split("\n")
-        sanitized = ""
-
-        start = 0
-        if not len(lines[start]):
-            start += 1
-
-        if lines[start] != '-----BEGIN PGP PUBLIC KEY BLOCK-----':
-            raise errors.InvalidInputFormat("GPG invalid format")
-        else:
-            sanitized += lines[start] + "\n"
-
-        i = 0
-        while i < len(lines):
-
-            # the C language as left some archetypes in my code
-            # [ITA] https://www.youtube.com/watch?v=7jI4DnRJP3k
-            i += 1
-
-            try:
-                if len(lines[i]) < 2:
-                    continue
-            except IndexError:
-                continue
-
-            main_content = re.compile(r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$", re.UNICODE)
-            base64only = main_content.findall(lines[i])
-
-            if len(base64only) == 1:
-                sanitized += str(base64only[0]) + "\n"
-
-            # this GPG/PGP format it's different from the common base64 ? dunno
-            if len(lines[i]) == 5 and lines[i][0] == '=':
-                sanitized += str(lines[i]) + "\n"
-
-            if lines[i] == '-----END PGP PUBLIC KEY BLOCK-----':
-                sanitized += lines[i] + "\n"
-                return sanitized
-
-        raise errors.InvalidInputFormat("Malformed PGP key block")
-
-    def validate_key(self, armored_key):
-        """
-        @param armored_key:
+        @param key:
         @return: True or False, True only if a key is effectively importable and listed.
         """
-
-        # or raise InvalidInputFormat
-        sanitized_gpgasc = self.sanitize_gpg_string(armored_key)
-
         try:
-            key = self.gpgh.import_keys(sanitized_gpgasc)
+            import_result = self.pgph.import_keys(key)
         except Exception as excep:
-            log.err("Error in GPG import_keys: %s" % excep)
-            return False
+            log.err("Error in PGP import_keys: %s" % excep)
+            raise errors.PGPKeyInvalid
 
-        # Error reported in stderr may just be warning, this is because is not raise an exception here
-        # if self.ke.stderr:
-        #     log.err("Receiver %s in uploaded GPG key has raise and alarm:\n< %s >" %
-        #             (self.receiver_desc['username'], (self.ke.stderr.replace("\n", "\n  "))[:-3]))
+        if len(import_result.fingerprints) != 1:
+            raise errors.PGPKeyInvalid
 
-        if not (hasattr(key, 'results') and
-                len(key.results) >= 1 and
-                key.results[0].has_key('fingerprint')):
-            log.err("User error: unable to import GPG key in the keyring")
-            return False
-
-        # else, the key has been loaded and we extract info about that:
-        self.fingerprint = key.results[0]['fingerprint']
+        fingerprint = import_result.fingerprints[0]
 
         # looking if the key is effectively reachable
         try:
-            all_keys = self.gpgh.list_keys()
+            all_keys = self.pgph.list_keys()
         except Exception as excep:
-            log.err("Error in GPG list_keys: %s" % excep)
-            return False
+            log.err("Error in PGP list_keys: %s" % excep)
+            raise errors.PGPKeyInvalid
 
-        self.keyinfo = u""
+        info = u""
+        expiration = datetime.utcfromtimestamp(0)
         for key in all_keys:
-            if key['fingerprint'] == self.fingerprint:
+            if key['fingerprint'] == fingerprint:
+                if key['expires']:
+                    expiration = datetime.utcfromtimestamp(int(key['expires']))
+                    exp_date = datetime_to_day_str(expiration)
+                else:
+                    exp_date = u'Never'
 
-                self.keyinfo += "Key length %s" % key['length']
+                info += "Key length: %s\n" % key['length']
+                info += "Key expiration: %s\n" % exp_date
+
                 try:
                     for uid in key['uids']:
-                        self.keyinfo += "\n\t%s" % uid
+                        info += "\t%s\n" % uid
                 except Exception as excep:
-                    log.err("Error in GPG key format/properties: %s" % excep)
-                    return False
+                    log.err("Error in PGP key format/properties: %s" % excep)
+                    raise errors.PGPKeyInvalid
 
-        if not len(self.keyinfo):
-            log.err("Key apparently imported but unable to be extracted info")
-            return False
+                break
 
-        return True
+        if not len(info):
+            log.err("Key apparently imported but unable to reload it")
+            raise errors.PGPKeyInvalid
 
+        return {
+            'fingerprint': fingerprint,
+            'expiration': expiration,
+            'info': info
+        }
 
-    def encrypt_file(self, plainpath, filestream, output_path):
+    def encrypt_file(self, key_fingerprint, plainpath, filestream, output_path):
         """
-        @param gpg_key_armor:
+        @param pgp_key_public:
         @param plainpath:
         @return:
         """
-        if not self.validate_key(self.receiver_desc['gpg_key_armor']):
-            raise errors.GPGKeyInvalid
-
-        encrypt_obj = self.gpgh.encrypt_file(filestream, str(self.receiver_desc['gpg_key_fingerprint']))
+        encrypt_obj = self.pgph.encrypt_file(filestream, str(key_fingerprint))
 
         if not encrypt_obj.ok:
-            # continue here if is not ok
-            log.err("Falure in encrypting file %s %s (%s)" % ( plainpath,
-                                                               self.receiver_desc['username'],
-                                                               self.receiver_desc['gpg_key_fingerprint']))
-            log.err(encrypt_obj.stderr)
-            raise errors.GPGKeyInvalid
+            raise errors.PGPKeyInvalid
 
-        log.debug("Encrypting for %s (%s) file %s (%d bytes)" %
-                  (self.receiver_desc['username'], self.receiver_desc['gpg_key_fingerprint'],
+        log.debug("Encrypting for key %s file %s (%d bytes)" %
+                  (key_fingerprint,
                    plainpath, len(str(encrypt_obj))))
 
-        encrypted_path = os.path.join(os.path.abspath(output_path),
-                                      "gpg_encrypted-%s" % xeger(r'[A-Za-z0-9]{8}'))
-
-        if os.path.isfile(encrypted_path):
-            log.err("Unexpected unpredictable unbelievable error! %s" % encrypted_path)
-            raise errors.InternalServerError("File conflict in GPG encrypted output")
+        encrypted_path = os.path.join(os.path.abspath(output_path), "pgp_encrypted-%s" % generateRandomKey(16))
 
         try:
             with open(encrypted_path, "w+") as f:
                 f.write(str(encrypt_obj))
-
-            return encrypted_path, len(str(encrypt_obj))
-
         except Exception as excep:
-            log.err("Error in writing GPG file output: %s (%s) bytes %d" %
+            log.err("Error in writing PGP file output: %s (%s) bytes %d" %
                     (excep.message, encrypted_path, len(str(encrypt_obj)) ))
             raise errors.InternalServerError("Error in writing [%s]" % excep.message)
 
+        else:
+            return encrypted_path, len(str(encrypt_obj))
 
-    def encrypt_message(self, plaintext):
+    def encrypt_message(self, key_fingerprint, plaintext):
         """
         @param plaindata:
             An arbitrary long text that would be encrypted
@@ -463,141 +484,20 @@ class GLBGPG:
             The unicode of the encrypted output (armored)
 
         """
-        if not self.validate_key(self.receiver_desc['gpg_key_armor']):
-            raise errors.GPGKeyInvalid
-
         # This second argument may be a list of fingerprint, not just one
-        encrypt_obj = self.gpgh.encrypt(plaintext, str(self.receiver_desc['gpg_key_fingerprint']))
+        encrypt_obj = self.pgph.encrypt(plaintext, str(key_fingerprint))
 
         if not encrypt_obj.ok:
-            # else, is not .ok
-            log.err("Falure in encrypting %d bytes for %s (%s)" % (len(plaintext),
-                                                                   self.receiver_desc['username'],
-                                                                   self.receiver_desc['gpg_key_fingerprint']))
-            log.err(encrypt_obj.stderr)
-            raise errors.GPGKeyInvalid
+            raise errors.PGPKeyInvalid
 
-        log.debug("Encrypting for %s (%s) %d byte of plain data (%d cipher output)" %
-                  (self.receiver_desc['username'], self.receiver_desc['gpg_key_fingerprint'],
+        log.debug("Encrypting for key %s %d byte of plain data (%d cipher output)" %
+                  (key_fingerprint,
                    len(plaintext), len(str(encrypt_obj))))
 
         return str(encrypt_obj)
 
-
     def destroy_environment(self):
         try:
-            shutil.rmtree(self.gpgh.gnupghome)
+            shutil.rmtree(self.pgph.gnupghome)
         except Exception as excep:
-            log.err("Unable to clean temporary GPG environment: %s: %s" % (self.gpgh.gnupghome, excep))
-
-
-def gpg_options_parse(receiver, request):
-    """
-    This is called in a @transact, when receiver update prefs and
-    when admin configure a new key (at the moment, Admin GUI do not
-    permit to sets preferences, but still the same function is
-    used.
-
-    @param receiver: the Storm object
-    @param request: the Dict receiver by the Internets
-    @return: None
-
-    This function is called in create_recever and update_receiver
-    and is used to manage the GPG options forced by the administrator
-
-    This is needed also because no one of these fields are
-    *enforced* by unicode_keys or bool_keys in models.Receiver
-
-    GPG management, here are check'd these actions:
-    1) Proposed a new GPG key, is imported to check validity, and
-       stored in Storm DB if not error raise
-    2) Removal of the present key
-
-    Further improvement: update the keys using keyserver
-    """
-
-    new_gpg_key = request.get('gpg_key_armor', None)
-    remove_key = request.get('gpg_key_remove', False)
-
-    encrypt_notification = acquire_bool(request.get('gpg_enable_notification', False))
-
-    # set a default status
-    receiver.gpg_key_status = Receiver._gpg_types[0]
-
-    if remove_key:
-        log.debug("User %s %s request to remove GPG key (%s)" %
-                  (receiver.name, receiver.user.username, receiver.gpg_key_fingerprint))
-
-        # In all the cases below, the key is marked disabled as request
-        receiver.gpg_key_status = Receiver._gpg_types[0] # Disabled
-        receiver.gpg_key_info = None
-        receiver.gpg_key_armor = None
-        receiver.gpg_key_fingerprint = None
-        receiver.gpg_enable_notification = False
-
-    if receiver.gpg_key_status == Receiver._gpg_types[1]:
-        receiver.gpg_enable_notification = encrypt_notification
-        log.debug("Receiver %s sets GPG usage: notification %s" %
-                  (receiver.user.username,
-                   "YES" if encrypt_notification else "NO"))
-
-    if new_gpg_key:
-
-        fake_receiver_dict = {'username': receiver.user.username}
-        gnob = GLBGPG(fake_receiver_dict)
-        if not gnob.validate_key(new_gpg_key):
-            raise errors.GPGKeyInvalid
-
-        log.debug("GPG Key imported and enabled in file and notification: %s" % gnob.keyinfo)
-
-        receiver.gpg_key_info = gnob.keyinfo
-        receiver.gpg_key_fingerprint = gnob.fingerprint
-        receiver.gpg_key_status = Receiver._gpg_types[1] # Enabled
-        receiver.gpg_key_armor = new_gpg_key
-        # default enabled https://github.com/globaleaks/GlobaLeaks/issues/620
-        receiver.gpg_enable_notification = True
-
-        gnob.destroy_environment()
-
-
-def get_expirations(keylist):
-    """
-    This function is not implemented in GPG object class because need to operate
-    on the whole keys
-    """
-    try:
-        temp_gpgroot = os.path.join(GLSetting.gpgroot, "-expiration_check-%s" % xeger(r'[A-Za-z0-9]{8}'))
-        os.makedirs(temp_gpgroot, mode=0700)
-        gpexpire = GPG(gnupghome=temp_gpgroot, options=['--trust-model', 'always'])
-    except Exception as excep:
-        log.err("Unable to setup expiration check environment: %s" % excep)
-        raise excep
-
-    try:
-        for key in keylist:
-            gpexpire.import_keys(key)
-    except Exception as excep:
-        log.err("Error in GPG import_keys: %s" % excep)
-        raise excep
-
-    try:
-        all_keys = gpexpire.list_keys()
-    except Exception as excep:
-        log.err("Error in GPG list_keys: %s" % excep)
-        raise excep
-
-    expirations = {}
-    for ak in all_keys:
-        expirations.update({ak['fingerprint']: ak['date']})
-
-    return expirations
-
-
-def access_tip(store, user_id, tip_id):
-    rtip = store.find(ReceiverTip, ReceiverTip.id == unicode(tip_id),
-                      ReceiverTip.receiver_id == user_id).one()
-
-    if not rtip:
-        raise errors.TipIdNotFound
-
-    return rtip
+            log.err("Unable to clean temporary PGP environment: %s: %s" % (self.pgph.gnupghome, excep))

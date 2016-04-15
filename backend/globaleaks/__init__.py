@@ -6,44 +6,48 @@
 import operator
 
 __author__ = u'Random GlobaLeaks Developers'
-__copyright__ = u'Hermes Center for Transparency and Digital Human Rights.'
+__copyright__ = u'2011-2016 - Hermes Center for Transparency and Digital Human Rights - GlobaLeaks Project'
 __email__ = u'info@globaleaks.org'
-__version__ = u'2.60.44'
+__version__ = u'2.61.3'
+__license__ = u'AGPL-3.0'
 
-DATABASE_VERSION = 15
+DATABASE_VERSION = 31
+FIRST_DATABASE_VERSION_SUPPORTED = 15
 
 # Add here by hand the languages supported!
 # copy paste format from 'grunt updateTranslations'
 LANGUAGES_SUPPORTED = [
  { "code": "ar", "name": "Arabic" },
- { "code": "bg", "name": "Bulgarian" },
- { "code": "ca", "name": "Catalan" },
- { "code": "cs", "name": "Czech" },
+ { "code": "bs", "name": "Bosnian" },
  { "code": "de", "name": "German" },
  { "code": "el", "name": "Greek" },
  { "code": "en", "name": "English" },
  { "code": "es", "name": "Spanish" },
+ { "code": "fa", "name": "Persian" },
  { "code": "fr", "name": "French" },
+ { "code": "he", "name": "Hebrew" },
  { "code": "hr_HR", "name": "Croatian (Croatia)" },
  { "code": "hu_HU", "name": "Hungarian (Hungary)" },
  { "code": "it", "name": "Italian" },
  { "code": "ja", "name": "Japanese" },
- { "code": "lv", "name": "Latvian" },
+ { "code": "ka", "name": "Georgian" },
+ { "code": "ko", "name": "Korean" },
  { "code": "nb_NO", "name": "Norwegian Bokmål (Norway)" },
  { "code": "nl", "name": "Dutch" },
- { "code": "pl", "name": "Polish" },
  { "code": "pt_BR", "name": "Portuguese (Brazil)" },
  { "code": "pt_PT", "name": "Portuguese (Portugal)" },
+ { "code": "ro", "name": "Romanian" },
  { "code": "ru", "name": "Russian" },
- { "code": "sk", "name": "Slovak" },
- { "code": "sr_RS", "name": "Serbian (Serbia)" },
- { "code": "sr_RS@latin", "name": "Serbian (Latin) (Serbia)" },
+ { "code": "sq", "name": "Albanian" },
  { "code": "sv", "name": "Swedish" },
+ { "code": "ta", "name": "Tamil" },
  { "code": "th", "name": "Thai" },
  { "code": "tr", "name": "Turkish" },
  { "code": "uk", "name": "Ukrainian" },
  { "code": "ur", "name": "Urdu" },
+ { "code": "vi", "name": "Vietnamese" },
  { "code": "zh_CN", "name": "Chinese (China)" },
+ { "code": "zh_TW", "name": "Chinese (Taiwan)" }
 ]
 
 # Sorting the list of dict using the key 'code'

@@ -14,52 +14,88 @@ import os
 from twisted.internet import defer
 
 from globaleaks.anomaly import Alarm
+from globaleaks.orm import transact
 from globaleaks.jobs.base import GLJob
-from globaleaks.settings import GLSetting, transact
+from globaleaks.settings import GLSettings
 from globaleaks.models import Stats, Anomalies
-from globaleaks.utils.utility import log, datetime_to_ISO8601, datetime_now
+from globaleaks.utils.utility import log, datetime_now
+
+
+def get_workingdir_space():
+    statvfs = os.statvfs(GLSettings.working_path)
+    free_bytes = statvfs.f_frsize * statvfs.f_bavail
+    total_bytes = statvfs.f_frsize * statvfs.f_blocks
+    return free_bytes, total_bytes
+
+def get_ramdisk_space():
+    statvfs = os.statvfs(GLSettings.ramdisk_path)
+    free_bytes = statvfs.f_frsize * statvfs.f_bavail
+    total_bytes = statvfs.f_frsize * statvfs.f_blocks
+    return free_bytes, total_bytes
+
 
 @transact
-def save_anomalies(store, when_anomaly, anomaly_desc, alarm_raised):
+def save_anomalies(store, anomaly_list):
+    for anomaly in anomaly_list:
+        anomaly_date, anomaly_desc, alarm_raised = anomaly
 
-   newanom = Anomalies()
+        newanom = Anomalies()
+        newanom.alarm = alarm_raised
+        newanom.date = anomaly_date
+        newanom.events = anomaly_desc
+        log.debug("adding new anomaly in to the record: %s, %s, %s" % (alarm_raised, anomaly_date, anomaly_desc))
+        store.add(newanom)
 
-   newanom.alarm = alarm_raised
-   newanom.stored_when = when_anomaly
-   newanom.events = anomaly_desc
+    if len(anomaly_list):
+        log.debug("save_anomalies: Saved %d anomalies collected during the last hour" % len(anomaly_list))
 
-   store.add(newanom)
+
+def get_anomalies():
+    anomalies = []
+    for when, anomaly_blob in dict(GLSettings.RecentAnomaliesQ).iteritems():
+        anomalies.append([when, anomaly_blob[0], anomaly_blob[1]])
+
+    return anomalies
+
+def get_statistics():
+    statsummary = {}
+
+    for descblob in GLSettings.RecentEventQ:
+        if 'event' not in descblob:
+            continue
+
+        statsummary.setdefault(descblob['event'], 0)
+        statsummary[descblob['event']] += 1
+
+    return statsummary
 
 @transact
 def save_statistics(store, start, end, activity_collection):
-
     newstat = Stats()
-
-    if activity_collection:
-        log.debug("since %s to %s I've collected: %s" %
-                  (start, end, activity_collection) )
-
     newstat.start = start
     newstat.summary = dict(activity_collection)
-    newstat.freemb = ResourceChecker.get_free_space()
-
+    newstat.free_disk_space = get_workingdir_space()[0]
     store.add(newstat)
+
+    if activity_collection:
+        log.debug("save_statistics: Saved statistics %s collected from %s to %s" %
+                  (activity_collection, start, end))
 
 
 class AnomaliesSchedule(GLJob):
     """
-    This class check for Anomalies, using the Alarm() object
-    implemented in anomaly.py
+    This job checks for anomalies and take care of saving them on the db.
     """
+    name = "Anomalies"
 
     @defer.inlineCallbacks
-    def operation(self, alarm_enable=True):
-        """
-        Every X seconds is checked if anomalies are happening
-        from anonymous interaction (submission/file/comments/whatever flood)
-        If the alarm has been raise, logs in the DB the event.
-        """
+    def operation(self):
         yield Alarm.compute_activity_level()
+
+        free_disk_bytes, total_disk_bytes = get_workingdir_space()
+        free_ramdisk_bytes, total_ramdisk_bytes = get_ramdisk_space()
+
+        Alarm.check_disk_anomalies(free_disk_bytes, total_disk_bytes, free_ramdisk_bytes, total_ramdisk_bytes)
 
 
 class StatisticsSchedule(GLJob):
@@ -67,72 +103,43 @@ class StatisticsSchedule(GLJob):
     Statistics just flush two temporary queue and store them
     in the database.
     """
+    name = "Statistics Sched"
 
-    collection_start_datetime = datetime_now()
-    RecentEventQ = []
-    RecentAnomaliesQ = {}
+    def __init__(self):
+        self.collection_start_time = datetime_now()
+        GLJob.__init__(self)
 
-    @staticmethod
-    def reset():
-        StatisticsSchedule.RecentEventQ = []
-        StatisticsSchedule.RecentAnomaliesQ = {}
+    @classmethod
+    def reset(cls):
+        GLSettings.RecentEventQ = []
+        GLSettings.RecentAnomaliesQ = {}
+        cls.collection_start_time = datetime_now()
 
     @defer.inlineCallbacks
     def operation(self):
-        """
-        executed every 60 minutes
-        """
+        # ------- BEGIN Anomalies section -------
+        anomalies_to_save = get_anomalies()
+        yield save_anomalies(anomalies_to_save)
+        # ------- END Anomalies section ---------
 
-        for when, anomaly_blob in dict(StatisticsSchedule.RecentAnomaliesQ).iteritems():
-            yield save_anomalies(when, anomaly_blob[0], anomaly_blob[1])
-
-        StatisticsSchedule.RecentAnomaliesQ = dict()
-
-        # Addres the statistics. the time start and end are in string
-        # without the last 8 bytes, to let d3.js parse easily (or investigate),
-        # creation_date, default model, is ignored in the visualisation
+        # ------- BEGIN Stats section -----------
         current_time = datetime_now()
-        statistic_summary = {}
-
-        #  {  'id' : expired_event.event_id
-        #     'when' : datetime_to_ISO8601(expired_event.creation_date)[:-8],
-        #     'event' : expired_event.event_type, 'duration' :   }
-
-        for descblob in StatisticsSchedule.RecentEventQ:
-            if not descblob.has_key('event'):
-                continue
-            statistic_summary.setdefault(descblob['event'], 0)
-            statistic_summary[descblob['event']] += 1
-
-        yield save_statistics(StatisticsSchedule.collection_start_datetime,
+        statistic_summary = get_statistics()
+        yield save_statistics(self.collection_start_time,
                               current_time, statistic_summary)
+        # ------- END Stats section -------------
 
-        StatisticsSchedule.reset()
-        StatisticsSchedule.collection_start_datetime = current_time
+        # ------- BEGIN Mail thresholds management -----------
+        GLSettings.exceptions = {}
+        GLSettings.exceptions_email_count = 0
 
-        log.debug("Saved stats and time updated, keys saved %d" %
-                  len(statistic_summary.keys()))
+        for k, v in GLSettings.mail_counters.iteritems():
+            if v > GLSettings.memory_copy.notification_threshold_per_hour:
+                GLSettings.mail_counters[k] -= GLSettings.memory_copy.notification_threshold_per_hour
+            else:
+                GLSettings.mail_counters[k] = 0
+        # ------- END Mail thresholds management -----------
 
+        self.reset()
 
-class ResourceChecker(GLJob):
-    """
-    ResourceChecker is a scheduled job that verify the available
-    resources in the GlobaLeaks box.
-    At the moment is implemented only a monitor for the disk space,
-    because the files that might be uploaded depend directly from
-    this resource.
-    """
-
-    @classmethod
-    def get_free_space(cls):
-        statvfs = os.statvfs(GLSetting.working_path)
-        free_mega_bytes = statvfs.f_frsize * statvfs.f_bavail / (1024 * 1024)
-        return free_mega_bytes
-
-    def operation(self):
-
-        from globaleaks.anomaly import Alarm
-        free_mega_bytes = ResourceChecker.get_free_space()
-
-        alarm = Alarm()
-        alarm.report_disk_usage(free_mega_bytes)
+        log.debug("Saved stats and time updated, keys saved %d" % len(statistic_summary.keys()))

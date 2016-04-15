@@ -18,37 +18,18 @@ NAME=$(basename $(readlink -nf $0))
 
 SCRIPTNAME=$0
 
+##################################################################
+# load defaults from /usr/share/globaleaks/default and then from
+# /etc/default/globaleaks so that we assure that new variables are
+# always present regardless of user errors on updates
+if test -e "/usr/share/globaleaks/default" ; then
+   . "/usr/share/globaleaks/default"
+fi
+
 if test -e "/etc/default/globaleaks" ; then
    . "/etc/default/globaleaks"
 fi
-
-if [ -d "/etc/default/globaleaks.d" ]; then
-   for i in "/etc/default/globaleaks.d/"*; do
-       if [ -f "$i" ]; then
-           ## If the last character is a ~, ignore that file, because it was created
-           ## by some editor, which creates backup files.
-           if [ "${i: -1}" = "~" ]; then
-               true "skip $i"
-               continue
-           fi
-           ## Skipping files such as .dpkg-old and .dpkg-dist.
-           if ( echo "$i" | grep -q ".dpkg-" ); then
-               true "skip $i"
-               continue
-           fi
-           bash_n_exit_code="0"
-           bash_n_output="$(bash -n "$i" 2>&1)" || { bash_n_exit_code="$?" ; true; };
-           if [ ! "$bash_n_exit_code" = "0" ]; then
-               echo "Invalid config file: $i
-bash_n_exit_code: $bash_n_exit_code
-bash_n_output:
-$bash_n_output" >&2
-               exit 1
-           fi
-           . "$i"
-       fi
-   done
-fi
+##################################################################
 
 . /lib/init/vars.sh
 
@@ -61,9 +42,9 @@ if [ "$EUID" -ne "0" ]; then
    exit 0
 fi
 
-GLBACKEND_PIDFILE=/var/run/globaleaks/globaleaks-${LISTENING_PORT}.pid
+GLBACKEND_PIDFILE=/var/run/globaleaks/globaleaks.pid
 
-if [ "${TRAVIS}" == "true" ]; then
+if [ "${TRAVIS}" = "true" ]; then
     NETWORK_SANDBOXING=0
 fi
 
@@ -105,19 +86,25 @@ read_pid()
 check_iptables()
 {
     if ! which iptables >/dev/null 2>&1 ; then
-        log_action_end_msg 1 "GlobaLeaks Network Sandboxing requires iptables"
+        echo "GlobaLeaks Network Sandboxing Failure: requires iptables"
         exit 1
     fi
 
     iptables -nvL -t nat >/dev/null 2>&1
     if [ "$?" -ne "0" ]; then
-        log_action_end_msg 1 "missing iptables nat support"
+        echo "GlobaLeaks Network Sandboxing Failure: missing iptables nat support"
         exit 1
     fi
 
     iptables -nvL -t filter >/dev/null 2>&1
     if [ "$?" -ne "0" ]; then
-        log_action_end_msg 1 "missing iptables filter support"
+        echo "GlobaLeaks Network Sandboxing Failure: missing iptables filter support"
+        exit 1
+    fi
+
+    iptables -m owner -h >/dev/null 2>&1
+    if [ "$?" -ne "0" ]; then
+        echo "GlobaLeaks Network Sandboxing Failure: missing iptables owner support"
         exit 1
     fi
 }
@@ -223,16 +210,25 @@ do_start()
     GLBACKEND_ARGS="--ip=${IPS}
                     --port=${LISTENING_PORT}
                     --accept-host=${HOSTS}
-                    --user=${USERNAME} --group=${GROUP}
+                    --user=${USERNAME}
+                    --group=${GROUP}
                     --working-path=${WORKING_DIR}
                     --ramdisk=${RAM_DISK}
                     --tor-dir=${TOR_DIR}
-                    --loglevel=${LOGLEVEL}
-                    --http-log=${HTTPLOG}"
+                    --loglevel=${LOGLEVEL}"
 
+    if [ "${DISABLE_MAIL_TORIFICATION}" -eq "1" ]; then
+        GLBACKEND_ARGS+=" --disable-mail-torification"
+    fi
 
-    if [ "${STORMDEBUG}" -eq "1" ]; then
-        GLBACKEND_ARGS+=" --storm-debug"
+    if [ "${DISABLE_MAIL_NOTIFICATION}" -eq "1" ]; then
+        GLBACKEND_ARGS+=" --disable-mail-notification"
+    fi
+
+    if [ "${DISABLE_SWAP}" -eq "1" ]; then
+        # Raise the mlock limit to the max
+        ulimit -l unlimited
+        GLBACKEND_ARGS+=" --disable-swap"
     fi
 
     STARTCMD="${GLBACKEND_DAEMON} ${GLBACKEND_ARGS}"
@@ -246,23 +242,36 @@ do_start()
 
     # Check to see if the GLBackend daemon is already running.
     if [ "${GLBACKEND_PID}" -ne "0" ]; then
-      if kill -0 ${GLBACKEND_PID} >/dev/null 2<&-; then
-        log_end_msg 0 "GlobaLeaks already running at pid ${GLBACKEND_PID}"
-        exit 0
-      fi
+        if kill -0 ${GLBACKEND_PID} >/dev/null 2<&-; then
+            log_end_msg 0 "GlobaLeaks already running at pid ${GLBACKEND_PID}"
+            exit 0
+        fi
     fi
 
     if [ "${NETWORK_SANDBOXING}" -eq "1" ]; then
         network_sandboxing_start
     fi
 
+
     if [ "${APPARMOR_SANDBOXING}" -eq "1" ]; then
+        APPARMOR_STARTED=0
+
+        log_action_begin_msg "Enabling GlobaLeaks Apparmor Sandboxing"
+
         test -x /usr/sbin/aa-status \
             && test -x /usr/sbin/aa-exec \
             && test -e /etc/apparmor.d/usr.bin.globaleaks \
             && /usr/sbin/aa-status --enabled \
             && STARTCMD="/usr/sbin/aa-exec --profile=usr.bin.globaleaks -- $STARTCMD" \
-            && echo "Enabling GlobaLeaks Apparmor Sandboxing"
+            && APPARMOR_STARTED=1
+
+        if [ "${APPARMOR_STARTED}" -eq "0" ]; then
+            log_action_end_msg 1 "Unable to initialize AppArmor!"
+            echo "Unable to initialize AppArmor!"
+            echo "AppArmor is probably disabled; please enable it by following instructions at https://wiki.debian.org/AppArmor/HowToUse"
+            echo "If you understand the risks involved and you know what you are doing, you can disable GlobaLeaks's Apparmor support by editing /etc/default/globaleaks and configuring APPARMOR_SANDBOXING=0"
+            exit 1
+        fi
     fi
 
     # This is a little hack to avoid python doing os.chdir('.') and getting mad.
@@ -293,7 +302,6 @@ do_stop()
     if [ "${NETWORK_SANDBOXING}" -eq "1" ]; then
         network_sandboxing_stop
     fi
-
 }
 
 do_restart()

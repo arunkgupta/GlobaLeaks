@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 from twisted.internet.defer import inlineCallbacks
 
-from globaleaks.handlers.base import GLApiCache
-from globaleaks.settings import transact
+from globaleaks.orm import transact
+from globaleaks.rest.apicache import GLApiCache
 from globaleaks.tests import helpers
 
-class TestGLApiCache(helpers.TestGL):
 
+class TestGLApiCache(helpers.TestGL):
     @inlineCallbacks
     def setUp(self):
-        yield helpers.TestGL.setUp(self) 
+        yield helpers.TestGL.setUp(self)
 
         GLApiCache.invalidate()
 

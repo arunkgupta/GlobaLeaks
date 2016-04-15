@@ -1,184 +1,194 @@
-<div id="ContentBox" class="container">
-  <div class="row">
-    <div id="ConfigSidebarBox" class="col-md-3" data-ng-include="'views/admin/sidebar.html'"></div>
-    <div class="col-md-9">
-
-      <div data-ng-controller="AdminContextsCtrl">
-        <form name="newContext" novalidate class="col-md-12" novalidate>
-          <div class="addContext col-md-6">
-            <h4><span data-translate>Add new context</span></h4>
-            <div class="row">
-              <div class="col-md-12">
-                <div class="form-group">
-                  <label data-translate>Name</label>
-                  <input class="form-control" data-ng-model="new_context_name" type="text" required>
-                </div>
-              </div>
-            </div>
-            <div class="row">
-              <div class="col-md-12">
-                <div class="form-group">
-                  <button class="pull-left btn btn-success" data-ng-disabled="newContext.$invalid" data-ng-click="add_context(new_context_name)">
-                    <i class="glyphicon glyphicon-ok"></i>
-                    <span data-translate>Add</span>
+<div class="row">
+  <div id="ConfigSidebarBox" class="col-md-3" data-ng-include="'views/admin/sidebar.html'"></div>
+  <div class="col-md-9" data-ng-controller="AdminContextsCtrl">
+    <div class="adminConfigSection row" data-ng-controller="AdminContextAddCtrl">
+      <form name="newContext" class="addContext col-md-6" novalidate>
+        <div class="editorTitle" data-translate>Add new context</div>
+        <div class="form-group">
+          <label data-translate>Name</label>
+          <input name="name" class="form-control" data-ng-model="new_context.name" maxlength="{{node.maximum_namesize}}" type="text" required>
+          <div class="text-red" data-ng-show="newContext.name.$error.required">
+            <span data-translate>This field is mandatory</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <button class="pull-left btn btn-primary" data-ng-disabled="newContext.$invalid" data-ng-click="add_context()" type="submit">
+            <i class="glyphicon glyphicon-plus-sign"></i>
+            <span data-translate>Add</span>
+          </button>
+        </div>
+      </form>
+    </div>
+    <div class="adminConfigSection" data-ng-show="admin.contexts.length > 0">
+      <div class="editorTitle" data-translate>Configured contexts:</div>
+      <div data-ng-repeat="context in admin.contexts | orderBy:'presentation_order'">
+        <form id="context-{{$index}}" name="editContext" data-ng-controller="AdminContextEditorCtrl" novalidate>
+          <div class="configItem">
+            <div class="editorHeader row" data-ng-click="toggleEditing(); $event.stopPropagation();">
+              <span class="col-md-7 editorHeaderTitle">{{context.name}}</span>
+              <span class="col-md-5">
+                <span class="pull-right">
+                  <button
+                    class="actionButton actionButtonEdit btn btn-xs btn-default"
+                    data-ng-show="!editing"
+                    data-ng-click="toggleEditing(); $event.stopPropagation();">
+                    <span data-translate>Edit</span>
                   </button>
+                  <button
+                    class="actionButton actionButtonSave btn btn-xs btn-success"
+                    data-ng-show="editing"
+                    data-ng-click="save_context(context)">
+                    <span data-translate>Save</span>
+                  </button>
+                  <button
+                    class="actionButton actionButtonCancel btn btn-xs btn-default"
+                    data-ng-show="editing"
+                    data-ng-click="toggleEditing(); $event.stopPropagation();">
+                    <span data-translate>Cancel</span>
+                  </button>
+                  <button
+                    class="actionButton actionButtonDelete btn btn-xs btn-danger"
+                    data-ng-click="contextDeleteDialog(context); $event.stopPropagation();">
+                    <span data-translate>Delete</span>
+                  </button>
+                  <span data-ng-if="admin.contexts.length > 1">
+                    <button class="actionButton btn btn-xs btn-primary" data-ng-click="moveUpAndSave(context); $event.stopPropagation();" uib-popover="{{'Move up' | translate}}" popover-placement="left" popover-trigger="mouseenter">
+                      <i class="glyphicon glyphicon-menu-up"></i>
+                    </button>
+                    <button class="actionButton btn btn-xs btn-primary" data-ng-click="moveDownAndSave(context); $event.stopPropagation();" uib-popover="{{'Move down' | translate}}" popover-placement="left" popover-trigger="mouseenter">
+                      <i class="glyphicon glyphicon-menu-down"></i>
+                    </button>
+                  </span>
+                </span>
+              </span>
+            </div>
+            <div data-ng-if="editing">
+              <hr />
+              <div class="row">
+                <div class="col-md-6">
+                  <div class="form-group">
+                    <div image-upload image-upload-model="context" image-upload-model-attr="picture" image-upload-url="{{'admin/contexts/' + context.id + '/img'}}"></div>
+                  </div>
+                  <div class="form-group">
+                    <label data-translate>Name</label>
+                    <input name="name" class="form-control" maxlength="{{node.maximum_namesize}}" data-ng-model="context.name" type="text" required>
+                    <div class="text-red" data-ng-show="editContext.name.$error.required" data-translate>This field is mandatory</div>
+                  </div>
+                  <div class="form-group">
+                    <label data-translate>Description</label>
+                    <textarea name="description" class="form-control" data-ng-model="context.description" maxlength="{{node.maximum_textsize}}"></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label data-translate>Text shown on top of the interface for selecting recipients</label>
+                    <textarea name="description" class="form-control" data-ng-model="context.recipients_clarification" maxlength="{{node.maximum_textsize}}"></textarea>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="form-group">
+                    <label data-translate>Questionnaire</label>
+                    <select class="form-control" data-ng-model="context.questionnaire_id" data-ng-options="item.id as item.name for item in admin.questionnaires"></select>
+                  </div>
+                  <div class="form-group">
+                    <label data-translate>Recipients</label>
+                    <div class="selectionList">
+                      <div data-ng-repeat="receiver in admin.receivers">
+                        <div class="row" data-ng-click="toggle(receiver)">
+                          <span class="col-md-1">
+                            <span data-ng-show="isSelected(receiver)">
+                              <i class="glyphicon glyphicon-check"></i>
+                            </span>
+                            <span data-ng-show="!isSelected(receiver)">
+                              <i class="glyphicon glyphicon-unchecked"></i>
+                            </span>
+                          </span>
+                          <span class="col-md-10">{{receiver.name}}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>UUID: {{context.id}}</div>
+                </div>
+                <div class="col-md-12">
+                  <a class="actionButton actionButtonAdvanced btn btn-info" data-ng-click="show_advanced_settings = !show_advanced_settings" data-ng-init="show_advanced_settings=false">
+                    <i data-ng-if="!show_advanced_settings" class="glyphicon glyphicon-plus"></i>
+                    <i data-ng-if="show_advanced_settings" class="glyphicon glyphicon-minus"></i>
+                    <span data-translate>Advanced settings</span>
+                  </a>
+                  <div id="ContextAdvancedSettingsBox">
+                    <div class="row" data-ng-show="show_advanced_settings">
+                      <div class="col-md-6">
+                        <div class="form-group">
+                          <input data-ng-model="context.show_context" type="checkbox" />
+                          <label data-translate>Allow selection of this context through the context selector.</label>
+                          <div data-translate>If disabled, submissions for this context will only be accessible through a direct link to it.</div>
+                        </div>
+                        <div class="form-group">
+                          <input data-ng-model="context.allow_recipients_selection" type="checkbox" />
+                          <label data-translate>Allow whistleblowers to select their recipients</label>
+                        </div>
+                        <div data-ng-show="context.allow_recipients_selection">
+                          <div class="form-group">
+                            <label>
+                              <input data-ng-model="context.show_receivers_in_alphabetical_order" type="checkbox" />
+                              <span data-translate>Show recipients in alphabetical order</span>
+                            </label>
+                          </div>
+                          <div class="form-group">
+                            <input data-ng-model="context.select_all_receivers" type="checkbox" />
+                            <label data-translate>Select all recipients by default</label>
+                          </div>
+                          <div class="form-group" data-ng-show="!context.select_all_receivers">
+                            <label data-translate>Maximum number of selectable recipients:</label> <label data-translate>(0 = unlimited)</label>
+                            <input class="form-control" data-ng-model="context.maximum_selectable_receivers" type="number" />
+                          </div>
+                          <div class="form-group">
+                            <input data-ng-model="context.show_small_receiver_cards" type="checkbox" />
+                            <label data-translate>Show small recipient cards on submission interface</label>
+                          </div>
+                        </div>
+                        <div class="form-group">
+                          <input data-ng-model="context.enable_comments" type="checkbox" />
+                          <label data-translate>Enable comments</label>
+                        </div>
+                        <div class="form-group" data-ng-if="context.enable_comments">
+                          <input data-ng-model="context.enable_two_way_comments" type="checkbox" />
+                          <label data-translate>Allow whistleblowers to write comments</label>
+                        </div>
+                        <div class="form-group">
+                          <input data-ng-model="context.enable_messages" type="checkbox" />
+                          <label data-translate>Enable private messages</label>
+                        </div>
+                        <div class="form-group" data-ng-if="context.enable_messages">
+                          <input data-ng-model="context.enable_two_way_messages" type="checkbox" />
+                          <label data-translate>Allow whistleblowers to send messages</label>
+                        </div>
+                        <div class="form-group">
+                          <input data-ng-model="context.enable_attachments" type="checkbox" />
+                          <label data-translate>Allow whistleblowers to add attachments on existing submissions</label>
+                        </div>
+                        <div class="form-group">
+                          <input data-ng-model="context.show_recipients_details" type="checkbox" />
+                          <label data-translate>Show recipient details on the status page of the submission</label>
+                        </div>
+                        <div class="form-group">
+                          <label data-translate>Submission expiration, in days</label>
+                          <input class="form-control" data-ng-model="context.tip_timetolive" type="number" />
+                          <div data-translate>For security reasons, as a matter of data retention policy, the platform automatically deletes submissions and their data after a certain amount of time.</div>
+                        </div>
+                        <div class="form-group">
+                          <label data-translate>Message shown on top of the status page of the submission</label>
+                          <div>
+                            <textarea name="description" class="form-control" data-ng-model="context.status_page_message" maxlength="{{node.maximum_textsize}}"></textarea>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </form>
-
-        <div data-ng-show="admin.contexts.length != 0">
-          <div class="text-right">
-            <button class="btn btn-success" data-ng-click="reorder_contexts_alphabetically()">
-              <i class="glyphicon glyphicon-sort-by-alphabet"></i>
-              <span data-translate>Reorder Contexts alphabetically</span>
-            </button>
-            <button class="btn btn-success" data-ng-click="save_all()" type="submit" >
-              <i class="glyphicon glyphicon-ok"></i>
-              <span data-translate>Save All</span>
-            </button>
-          </div>
-
-          <div ui-sortable="sortableOptions" data-ng-model="admin.contexts">
-
-            <div data-ng-repeat="context in admin.contexts | orderBy:'presentation_order'">
-              <form name="contextForm" data-ng-controller="AdminContextsEditorCtrl" novalidate>
-                <div class="configItem contextItem"  data-ng-class="{'configItemLast': $last}">
-
-                  <div class="row" data-ng-click="toggleEditing()">
-                    <div class="editorHeader contextEditorHeader handle">
-                      <div data-ng-show="!editing">
-                        <span class="col-md-7 pull-left editorHeaderTitle">{{ context.name }}</span>
-                        <span class="col-md-1 pull-right editorHeaderButtons" popover="{{ 'Click to edit, Drag to order' | translate }}" popover-placement="left" popover-trigger="mouseenter">
-                          <i class="glyphicon glyphicon-th"></i>
-                        </span>
-                      </div>
-
-                      <div data-ng-show="editing">
-                        <span class="col-md-7 pull-left editorHeaderTitle">{{ context.name }}</span>
-                        <span class="col-md-3 pull-right editorHeaderButtons">
-                          <button class="btn btn-success saveContext" data-ng-disabled="contextForm.$pristine" data-ng-click="save_context(context)" type="submit" >
-                            <i class="glyphicon glyphicon-ok"></i>
-                            <span data-translate>Save</span>
-                          </button>
-
-                          <a class="btn btn-danger deleteContext" data-ng-click="contextDeleteDialog(context)">
-                            <i class="glyphicon glyphicon-remove"></i>
-                            <span data-translate>Delete</span>
-                          </a>
-                        </span>
-                      </div>
-
-                    </div>
-                  </div>
-
-                  <div class="editor contextEditor" data-ng-if="editing">
-                    <div class="row">
-                      <div class="col-md-6">
-                        <div class="form-group">
-                          <label data-translate>Name</label>
-                          <input class="form-control" data-ng-maxlength="40" data-ng-model="context.name" value="{{context.name}}" type="text">
-                        </div>
-                        <div class="form-group">
-                          <label data-translate>Description</label>
-                          <div>
-                            <textarea class="form-control" data-ng-model="context.description">{{context.description}}</textarea>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="col-md-6">
-                        <label data-translate>Receivers</label>
-                        <div class="selectionList">
-                          <div data-ng-repeat="receiver in admin.receivers" data-ng-class="{clearfix: ($index % 2 == 1) || $last}">
-                            <div class="row" data-ng-click="toggle(receiver)">
-                            <span class="col-md-1">
-                              <span data-ng-show="isSelected(receiver)">
-                                <i class="glyphicon glyphicon-check"></i>
-                              </span>
-                              <span data-ng-show="!isSelected(receiver)">
-                                <i class="glyphicon glyphicon-unchecked"></i>
-                              </span>
-                            </span>
-                              <span class="col-md-10">{{receiver.name}}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="col-md-12">
-
-                        <button class="btn btn-info" data-ng-click="advanced_edit = !advanced_edit" data-ng-init="advanced_edit=false">
-                          <i class="glyphicon glyphicon-plus"></i>
-                          <span data-translate>Advanced settings</span>
-                        </button>
-
-                        <div class="row" data-ng-show="advanced_edit">
-                          <div class="col-md-6">
-                            <div class="form-group">
-                              <label data-translate>Incomplete submissions expiry time (hours)</label>
-                              <input class="form-control" data-ng-model="context.submission_timetolive" value="{{context.submission_timetolive}}" type="number">
-                            </div>
-                            <div class="form-group">
-                              <label data-translate>Maximum file downloads</label>
-                              <input class="form-control" data-ng-model="context.file_max_download" value="{{context.file_max_download}}" type="number">
-                            </div>
-                            <div class="form-group">
-                              <label data-translate>Submitted Tip expiry time (days)</label>
-                              <input class="form-control" data-ng-model="context.tip_timetolive" value="{{context.tip_timetolive}}" type="number">
-                            </div>
-                            <div class="form-group table-bordered">
-                              <input data-ng-model="context.select_all_receivers" value="{{context.select_all_receivers}}" type="checkbox">
-                              <label data-translate>Select all receivers by default</label>
-                            </div>
-                            <div class="form-group" data-ng-show="!context.select_all_receivers">
-                              <label><p data-translate>Maximum number of selectable Receivers:</p> <p data-translate>(0 = unlimited)</p></label>
-                              <input class="form-control" data-ng-model="context.maximum_selectable_receivers" value="{{context.maximum_selectable_receivers}}" type="number">
-                            </div>
-                            <div class="form-group table-bordered">
-                              <input data-ng-model="context.show_receivers" value="{{context.show_receivers}}" type="checkbox">
-                              <label data-translate>Show receivers</label>
-                            </div>
-                            <div class="form-group table-bordered">
-                              <input data-ng-model="context.show_small_cards" value="{{context.show_small_cards}}" type="checkbox">
-                              <label data-translate>Show small receiver cards on submission interface</label>
-                            </div>
-                            <div class="form-group table-bordered">
-                              <input data-ng-model="context.enable_private_messages" value="{{context.enable_private_messages}}" type="checkbox">
-                              <label data-translate>Enable private messages</label>
-                            </div>
-                            <div class="form-group table-bordered">
-                              <input data-ng-model="context.postpone_superpower" value="{{context.postpone_superpower}}" type="checkbox">
-                              <label data-translate>Permit Receivers to postpone expiration date of the Tips</label>
-                              <div data-ng-show="context.postpone_superpower">
-                              <span class="label label-info">
-                                <span data-translate>now Enabled:</span>
-                              </span>
-                                <span data-translate>Receivers of this Context will be able to postpone expiration date of the Tips.</span>
-                              </div>
-                            </div>
-                            <div class="form-group table-bordered">
-                              <input data-ng-model="context.can_delete_submission" value="{{context.can_delete_submission}}" type="checkbox">
-                              <label data-translate>Permit Receivers to delete Tips</label>
-                              <div data-ng-show="context.can_delete_submission">
-                                <span class="label label-info">
-                                  <span data-translate>now Enabled:</span>
-                                </span>
-                                <span data-translate>Receivers of this Context will be able to delete Tips and their content.</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="col-md-12">
-                        <div data-ng-include="'views/admin/steps_editor.html'"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>

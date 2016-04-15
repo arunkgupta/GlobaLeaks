@@ -1,147 +1,161 @@
 # -*- coding: UTF-8
-#   node
+# node
 #   ****
 #
 # Implementation of classes handling the HTTP request to /node, public
 # exposed API.
-
 import os
 
 from twisted.internet.defer import inlineCallbacks
 
-from globaleaks.utils.utility import datetime_to_ISO8601
-from globaleaks.utils.structures import Rosetta, get_localized_values
-from globaleaks.settings import transact_ro, GLSetting
-from globaleaks.handlers.base import BaseHandler, GLApiCache
-from globaleaks.handlers.authentication import transport_security_check, unauthenticated
 from globaleaks import models, LANGUAGES_SUPPORTED
+from globaleaks.handlers.base import BaseHandler
+from globaleaks.orm import transact_ro
+from globaleaks.settings import GLSettings
+from globaleaks.rest.apicache import GLApiCache
+from globaleaks.utils.structures import Rosetta, get_localized_values
 
-def get_field_option_localized_keys(field_type):
-    localized_keys = []
-    if field_type in ['checkbox', 'selectbox', 'fileupload']:
-        localized_keys = ['name']
-    elif field_type == 'tos':
-        localized_keys = ['clause', 'agreement_statement']
-
-    return localized_keys
 
 @transact_ro
-def anon_serialize_ahmia(store, language=GLSetting.memory_copy.default_language):
+def serialize_ahmia(store, language):
     """
-    Request reaches only if ahmia is enabled
+    Serialize Ahmia.fi descriptor.
     """
     node = store.find(models.Node).one()
 
-    mo = Rosetta(node.localized_strings)
+    mo = Rosetta(node.localized_keys)
     mo.acquire_storm_object(node)
 
     ret_dict = {
-        "title": node.name,
-        "description": mo.dump_localized_attr('description', language),
-
-        # TODO support tags/keyword in Node.
-        "keywords": "%s (GlobaLeaks instance)" % node.name,
-        "relation": node.public_site,
-
-        # TODO ask Ahmia to support a list of languages
-        "language": node.default_language,
-
-        # TODO say to the admin that its email will be public
-        "contactInformation": u'',
-        "type": "GlobaLeaks"
+        'title': node.name,
+        'description': mo.dump_localized_key('description', language),
+        'keywords': '%s (GlobaLeaks instance)' % node.name,
+        'relation': node.public_site,
+        'language': node.default_language,
+        'contactInformation': u'',
+        'type': 'GlobaLeaks'
     }
 
     return ret_dict
 
+
 @transact_ro
-def anon_serialize_node(store, language=GLSetting.memory_copy.default_language):
+def serialize_node(store, language):
+    """
+    Serialize node infos.
+    """
     node = store.find(models.Node).one()
 
     # Contexts and Receivers relationship
-    associated = store.find(models.ReceiverContext).count()
-
-    custom_homepage = False
-
-    try:
-        custom_homepage = os.path.isfile(os.path.join(GLSetting.static_path, "custom_homepage.html"))
-    except:
-        pass
+    configured = store.find(models.ReceiverContext).count() > 0
 
     ret_dict = {
-      'name': node.name,
-      'hidden_service': node.hidden_service,
-      'public_site': node.public_site,
-      'email': node.email,
-      'languages_enabled': node.languages_enabled,
-      'languages_supported': LANGUAGES_SUPPORTED,
-      'default_language' : node.default_language,
-      'default_timezone' : node.default_timezone,
-      # extended settings info:
-      'maximum_namesize': node.maximum_namesize,
-      'maximum_textsize': node.maximum_textsize,
-      'maximum_filesize': node.maximum_filesize,
-      # public serialization use GLSetting memory var, and
-      # not the real one, because needs to bypass
-      # Tor2Web unsafe deny default settings
-      'tor2web_admin': GLSetting.memory_copy.tor2web_admin,
-      'tor2web_submission': GLSetting.memory_copy.tor2web_submission,
-      'tor2web_receiver': GLSetting.memory_copy.tor2web_receiver,
-      'tor2web_unauth': GLSetting.memory_copy.tor2web_unauth,
-      'ahmia': node.ahmia,
-      'postpone_superpower': node.postpone_superpower,
-      'can_delete_submission': node.can_delete_submission,
-      'wizard_done': node.wizard_done,
-      'allow_unencrypted': node.allow_unencrypted,
-      'configured': True if associated else False,
-      'password': u"",
-      'old_password': u"",
-      'custom_homepage': custom_homepage,
-      'disable_privacy_badge': node.disable_privacy_badge,
-      'disable_security_awareness_badge': node.disable_security_awareness_badge,
-      'disable_security_awareness_questions': node.disable_security_awareness_questions,
-      'enable_custom_privacy_badge': node.enable_custom_privacy_badge,
-      'custom_privacy_badge_tbb': node.custom_privacy_badge_tbb,
-      'custom_privacy_badge_tor': node.custom_privacy_badge_tor,
-      'custom_privacy_badge_none': node.custom_privacy_badge_none,
+        'name': node.name,
+        'hidden_service': node.hidden_service,
+        'public_site': node.public_site,
+        'languages_enabled': node.languages_enabled,
+        'languages_supported': LANGUAGES_SUPPORTED,
+        'default_language': node.default_language,
+        'default_timezone': node.default_timezone,
+        'maximum_namesize': node.maximum_namesize,
+        'maximum_textsize': node.maximum_textsize,
+        'maximum_filesize': node.maximum_filesize,
+        'tor2web_admin': node.tor2web_admin,
+        'tor2web_custodian': node.tor2web_custodian,
+        'tor2web_whistleblower': node.tor2web_whistleblower,
+        'tor2web_receiver': node.tor2web_receiver,
+        'tor2web_unauth': node.tor2web_unauth,
+        'submission_minimum_delay': 0 if GLSettings.devel_mode else GLSettings.memory_copy.submission_minimum_delay,
+        'submission_maximum_ttl': GLSettings.memory_copy.submission_maximum_ttl,
+        'ahmia': node.ahmia,
+        'allow_indexing': node.allow_indexing,
+        'can_postpone_expiration': node.can_postpone_expiration,
+        'can_delete_submission': node.can_delete_submission,
+        'can_grant_permissions': node.can_grant_permissions,
+        'wizard_done': node.wizard_done,
+        'allow_unencrypted': node.allow_unencrypted,
+        'disable_encryption_warnings': node.disable_encryption_warnings,
+        'allow_iframes_inclusion': node.allow_iframes_inclusion,
+        'configured': configured,
+        'password': u'',
+        'old_password': u'',
+        'disable_submissions': node.disable_submissions,
+        'disable_privacy_badge': node.disable_privacy_badge,
+        'disable_security_awareness_badge': node.disable_security_awareness_badge,
+        'disable_security_awareness_questions': node.disable_security_awareness_questions,
+        'disable_key_code_hint': node.disable_key_code_hint,
+        'disable_donation_panel': node.disable_donation_panel,
+        'simplified_login': node.simplified_login,
+        'enable_custom_privacy_badge': node.enable_custom_privacy_badge,
+        'landing_page': node.landing_page,
+        'context_selector_type': node.context_selector_type,
+        'show_contexts_in_alphabetical_order': node.show_contexts_in_alphabetical_order,
+        'show_small_context_cards': node.show_small_context_cards,
+        'accept_submissions': GLSettings.accept_submissions,
+        'enable_captcha': node.enable_captcha,
+        'enable_proof_of_work': node.enable_proof_of_work,
+        'enable_experimental_features': node.enable_experimental_features,
+        'logo': node.logo.data if node.logo is not None else '',
+        'css': node.css.data if node.css is not None else ''
     }
 
-    return get_localized_values(ret_dict, node, node.localized_strings, language)
+    return get_localized_values(ret_dict, node, node.localized_keys, language)
 
-def anon_serialize_context(store, context, language=GLSetting.memory_copy.default_language):
+
+def serialize_context(store, context, language):
     """
+    Serialize context description
+
     @param context: a valid Storm object
     @return: a dict describing the contexts available for submission,
         (e.g. checks if almost one receiver is associated)
     """
-
-    receivers = [r.id for r in context.receivers]
-    if not len(receivers):
-        return None
-
-    steps = [ anon_serialize_step(store, s, language)
-              for s in context.steps.order_by(models.Step.number) ]
-
     ret_dict = {
-        "id": context.id,
-        "file_max_download": context.file_max_download,
-        "selectable_receiver": context.selectable_receiver,
-        "tip_max_access": context.tip_max_access,
-        "tip_timetolive": context.tip_timetolive,
-        "submission_introduction": u'NYI', # unicode(context.submission_introduction), # optlang
-        "submission_disclaimer": u'NYI', # unicode(context.submission_disclaimer), # optlang
-        "select_all_receivers": context.select_all_receivers,
-        "maximum_selectable_receivers": context.maximum_selectable_receivers,
-        "show_small_cards": context.show_small_cards,
-        "show_receivers": context.show_receivers,
-        "enable_private_messages": context.enable_private_messages,
-        "presentation_order": context.presentation_order,
-        "receivers": receivers,
-        "steps": steps
+        'id': context.id,
+        'presentation_order': context.presentation_order,
+        'tip_timetolive': context.tip_timetolive,
+        'select_all_receivers': context.select_all_receivers,
+        'maximum_selectable_receivers': context.maximum_selectable_receivers,
+        'show_context': context.show_context,
+        'show_recipients_details': context.show_recipients_details,
+        'allow_recipients_selection': context.allow_recipients_selection,
+        'show_small_receiver_cards': context.show_small_receiver_cards,
+        'enable_comments': context.enable_comments,
+        'enable_messages': context.enable_messages,
+        'enable_two_way_comments': context.enable_two_way_comments,
+        'enable_two_way_messages': context.enable_two_way_messages,
+        'enable_attachments': context.enable_attachments,
+        'show_receivers_in_alphabetical_order': context.show_receivers_in_alphabetical_order,
+        'questionnaire': serialize_questionnaire(store, context.questionnaire, language), 
+        'receivers': [r.id for r in context.receivers],
+        'picture': context.picture.data if context.picture is not None else ''
     }
 
-    return get_localized_values(ret_dict, context, context.localized_strings, language)
+    return get_localized_values(ret_dict, context, context.localized_keys, language)
 
-def anon_serialize_option(option, field_type, language):
+
+def serialize_questionnaire(store, questionnaire, language):
+    """
+    Serialize the specified questionnaire
+
+    :param store: the store on which perform queries.
+    :param language: the language in which to localize data.
+    :return: a dictionary representing the serialization of the questionnaire.
+    """
+    ret_dict = {
+        'id': questionnaire.id,
+        'key': questionnaire.key,
+        'editable': questionnaire.editable,
+        'name': questionnaire.name,
+        'show_steps_navigation_bar': questionnaire.show_steps_navigation_bar,
+        'steps_navigation_requires_completion': questionnaire.steps_navigation_requires_completion,
+        'steps': [serialize_step(store, s, language) for s in questionnaire.steps]
+    }
+
+    return get_localized_values(ret_dict, questionnaire, questionnaire.localized_keys, language)
+
+
+def serialize_field_option(option, language):
     """
     Serialize a field option, localizing its content depending on the language.
 
@@ -151,17 +165,39 @@ def anon_serialize_option(option, field_type, language):
     """
     ret_dict = {
         'id': option.id,
-        'attrs': {},
-        'value': ''
+        'presentation_order': option.presentation_order,
+        'score_points': option.score_points,
+        'trigger_field': option.trigger_field if option.trigger_field else '',
+        'trigger_step': option.trigger_step if option.trigger_step else ''
     }
 
-    keys = get_field_option_localized_keys(field_type)
+    return get_localized_values(ret_dict, option, option.localized_keys, language)
 
-    get_localized_values(ret_dict['attrs'], option.attrs, keys, language)
+
+def serialize_field_attr(attr, language):
+    """
+    Serialize a field attribute, localizing its content depending on the language.
+
+    :param option: the field attribute object to be serialized
+    :param language: the language in which to localize data
+    :return: a serialization of the object
+    """
+    ret_dict = {
+        'id': attr.id,
+        'name': attr.name,
+        'type': attr.type,
+        'value': attr.value
+    }
+
+    if attr.type == 'bool':
+        ret_dict['value'] = True if ret_dict['value'] == 'True' else False
+    elif attr.type == u'localized':
+        get_localized_values(ret_dict, ret_dict, ['value'], language)
 
     return ret_dict
 
-def anon_serialize_field(store, field, language):
+
+def serialize_field(store, field, language):
     """
     Serialize a field, localizing its content depending on the language.
 
@@ -169,199 +205,205 @@ def anon_serialize_field(store, field, language):
     :param language: the language in which to localize data
     :return: a serialization of the object
     """
-
     # naif likes if we add reference links
     # this code is inspired by:
     #  - https://www.youtube.com/watch?v=KtNsUgKgj9g
 
-    options = [ anon_serialize_option(o, field.type, language) for o in field.options ]
+    if field.template:
+        f_to_serialize = field.template
+    else:
+        f_to_serialize = field
 
-    sf = store.find(models.StepField, models.StepField.field_id == field.id).one()
-    step_id = sf.step_id if sf else ''
+    attrs = {}
+    for attr in store.find(models.FieldAttr, models.FieldAttr.field_id == f_to_serialize.id):
+        attrs[attr.name] = serialize_field_attr(attr, language)
 
-    ff = store.find(models.FieldField, models.FieldField.child_id == field.id).one()
-    fieldgroup_id = ff.parent_id if ff else ''
-
-    fields = []
-    for f in field.children.order_by(models.Field.y):
-        fields.append(anon_serialize_field(store, f, language))
+    triggered_by_options = [{
+        'field': trigger.field_id,
+        'option': trigger.id
+    } for trigger in field.triggered_by_options]
 
     ret_dict = {
         'id': field.id,
-        'is_template': field.is_template,
-        'step_id': step_id,
-        'fieldgroup_id': fieldgroup_id,
+        'key': f_to_serialize.key,
+        'instance': field.instance,
+        'editable': field.editable,
+        'type': f_to_serialize.type,
+        'template_id': field.template_id if field.template_id else '',
+        'step_id': field.step_id if field.step_id else '',
+        'fieldgroup_id': field.fieldgroup_id if field.fieldgroup_id else '',
         'multi_entry': field.multi_entry,
         'required': field.required,
         'preview': field.preview,
         'stats_enabled': field.stats_enabled,
-        'type': field.type,
+        'attrs': attrs,
         'x': field.x,
         'y': field.y,
-        'options': options,
-        'children': fields,
-        'value': ''
+        'width': field.width,
+        'triggered_by_score': field.triggered_by_score,
+        'triggered_by_options': triggered_by_options,
+        'options': [serialize_field_option(o, language) for o in f_to_serialize.options],
+        'children': [serialize_field(store, f, language) for f in f_to_serialize.children]
     }
 
-    return get_localized_values(ret_dict, field, field.localized_strings, language)
+    return get_localized_values(ret_dict, f_to_serialize, field.localized_keys, language)
 
-def anon_serialize_step(store, step, language):
+
+def serialize_step(store, step, language):
     """
     Serialize a step, localizing its content depending on the language.
 
-    :param step: the step object to be serialized.
+    :param step: the step to be serialized.
     :param language: the language in which to localize data
     :return: a serialization of the object
     """
-
-    fields = []
-    for f in step.children.order_by(models.Field.y):
-        fields.append(anon_serialize_field(store, f, language))
+    triggered_by_options = [{
+        'field': trigger.field_id,
+        'option': trigger.id
+    } for trigger in step.triggered_by_options]
 
     ret_dict = {
         'id': step.id,
-        'children': fields
+        'questionnaire_id': step.questionnaire_id,
+        'presentation_order': step.presentation_order,
+        'triggered_by_score': step.triggered_by_score,
+        'triggered_by_options': triggered_by_options,
+        'children': [serialize_field(store, f, language) for f in step.children]
     }
 
-    return get_localized_values(ret_dict, step, step.localized_strings, language)
+    return get_localized_values(ret_dict, step, step.localized_keys, language)
 
-def anon_serialize_receiver(receiver, language=GLSetting.memory_copy.default_language):
+
+def serialize_receiver(receiver, language):
     """
-    @param receiver: a valid Storm object
-    @return: a dict describing the receivers available in the node
-        (e.g. checks if almost one context is associated, or, in
-         node where GPG encryption is enforced, that a valid key is registered)
+    Serialize a receiver description
+
+    :param receiver: the receiver to be serialized
+    :param language: the language in which to localize data
+    :return: a serializtion of the object
     """
-
-    contexts = [c.id for c in receiver.contexts]
-    if not len(contexts):
-        return None
-
     ret_dict = {
-        "creation_date": datetime_to_ISO8601(receiver.creation_date),
-        "update_date": datetime_to_ISO8601(receiver.last_update),
-        "name": receiver.name,
-        "id": receiver.id,
-        "state": receiver.user.state,
-        "configuration": receiver.configuration, 
-        "presentation_order": receiver.presentation_order,
-        "gpg_key_status": receiver.gpg_key_status,
-        "contexts": contexts
+        'id': receiver.user.id,
+        'name': receiver.user.name,
+        'username': receiver.user.username if GLSettings.memory_copy.simplified_login else '',
+        'state': receiver.user.state,
+        'configuration': receiver.configuration,
+        'presentation_order': receiver.presentation_order,
+        'pgp_key_status': receiver.user.pgp_key_status,
+        'contexts': [c.id for c in receiver.contexts],
+        'picture': receiver.user.picture.data if receiver.user.picture is not None else ''
     }
 
-    return get_localized_values(ret_dict, receiver, receiver.localized_strings, language)
+    # description and eventually other localized strings should be taken from user model
+    get_localized_values(ret_dict, receiver.user, ['description'], language)
 
-
-class InfoCollection(BaseHandler):
-    """
-    U1
-    Returns information on the GlobaLeaks node. This includes submission
-    parameters (contexts description, fields, public receiver list).
-    Contains System-wide properties.
-    """
-
-    @transport_security_check("unauth")
-    @unauthenticated
-    @inlineCallbacks
-    def get(self, *uriargs):
-        """
-        Parameters: None
-        Response: publicNodeDesc
-        Errors: NodeNotFound
-        """
-        ret = yield GLApiCache.get('node', self.request.language,
-                                   anon_serialize_node, self.request.language)
-        self.finish(ret)
-
-
-class AhmiaDescriptionHandler(BaseHandler):
-    """
-    Description of Ahmia 'protocol' is in:
-    https://ahmia.fi/documentation/
-    and we're supporting the Hidden Service description proposal from:
-    https://ahmia.fi/documentation/descriptionProposal/
-    """
-
-    @transport_security_check("unauth")
-    @unauthenticated
-    @inlineCallbacks
-    def get(self, *uriargs):
-
-        node_info = yield GLApiCache.get('node', self.request.language,
-                                         anon_serialize_node, self.request.language)
-
-        if node_info['ahmia']:
-            ret = yield GLApiCache.get('ahmia', self.request.language,
-                                   anon_serialize_ahmia, self.request.language)
-
-            self.finish(ret)
-        else: # in case of disabled option we return 404
-            self.set_status(404)
-            self.finish()
+    return get_localized_values(ret_dict, receiver, receiver.localized_keys, language)
 
 
 @transact_ro
-def get_public_context_list(store, default_lang):
+def get_public_context_list(store, language):
     context_list = []
-    contexts = store.find(models.Context)
 
-    for context in contexts:
-        context_desc = anon_serialize_context(store, context, default_lang)
-        # context not yet ready for submission return None
-        if context_desc:
-            context_list.append(context_desc)
+    for context in store.find(models.Context):
+        if context.receivers.count():
+            context_list.append(serialize_context(store, context, language))
 
     return context_list
 
 
-class ContextsCollection(BaseHandler):
-    """
-    Return the public list of contexts, those information are shown in client
-    and would be memorized in a third party indexer service. This is way some dates
-    are returned within.
-    """
-    @transport_security_check("unauth")
-    @unauthenticated
-    @inlineCallbacks
-    def get(self, *uriargs):
-        """
-        Parameters: None
-        Response: publicContextList
-        Errors: None
-        """
-
-        ret = yield GLApiCache.get('contexts', self.request.language,
-                                   get_public_context_list, self.request.language)
-        self.finish(ret)
-
 @transact_ro
-def get_public_receiver_list(store, default_lang):
+def get_public_receiver_list(store, language):
     receiver_list = []
-    receivers = store.find(models.Receiver)
 
-    for receiver in receivers:
-        receiver_desc = anon_serialize_receiver(receiver, default_lang)
+    for receiver in store.find(models.Receiver):
+        if receiver.user.state == u'disabled':
+            continue
+
+        receiver_desc = serialize_receiver(receiver, language)
         # receiver not yet ready for submission return None
         if receiver_desc:
             receiver_list.append(receiver_desc)
 
     return receiver_list
 
-class ReceiversCollection(BaseHandler):
-    """
-    Return the description of all the receivers visible from the outside.
-    """
 
-    @transport_security_check("unauth")
-    @unauthenticated
+class NodeInstance(BaseHandler):
+    @BaseHandler.transport_security_check("unauth")
+    @BaseHandler.unauthenticated
     @inlineCallbacks
-    def get(self, *uriargs):
+    def get(self):
         """
-        Parameters: None
-        Response: publicReceiverList
-        Errors: None
+        Get the node infos.
         """
+        ret = yield GLApiCache.get('node', self.request.language,
+                                   serialize_node, self.request.language)
 
+        ret['custom_homepage'] = os.path.isfile(os.path.join(GLSettings.static_path,
+                                                             "custom_homepage.html"))
+
+        self.write(ret)
+
+
+class AhmiaDescriptionHandler(BaseHandler):
+    @BaseHandler.transport_security_check("unauth")
+    @BaseHandler.unauthenticated
+    @inlineCallbacks
+    def get(self):
+        """
+        Get the ahmia.fi descriptor
+        """
+        node_info = yield GLApiCache.get('node', self.request.language,
+                                         serialize_node, self.request.language)
+
+        if node_info['ahmia']:
+            ret = yield GLApiCache.get('ahmia', self.request.language,
+                                       serialize_ahmia, self.request.language)
+
+            self.write(ret)
+        else:  # in case of disabled option we return 404
+            self.set_status(404)
+
+
+class RobotstxtHandler(BaseHandler):
+    @BaseHandler.transport_security_check("unauth")
+    @BaseHandler.unauthenticated
+    @inlineCallbacks
+    def get(self):
+        """
+        Get the robots.txt
+        """
+        node_info = yield GLApiCache.get('node', self.request.language,
+                                         serialize_node, self.request.language)
+
+        self.set_header('Content-Type', 'text/plain')
+
+        if node_info['allow_indexing']:
+            self.write("User-agent: *\nAllow: /")
+        else:
+            self.write("User-agent: *\nDisallow: /")
+
+
+class ContextsCollection(BaseHandler):
+    @BaseHandler.transport_security_check("unauth")
+    @BaseHandler.unauthenticated
+    @inlineCallbacks
+    def get(self):
+        """
+        Get all the contexts.
+        """
+        ret = yield GLApiCache.get('contexts', self.request.language,
+                                   get_public_context_list, self.request.language)
+        self.write(ret)
+
+
+class ReceiversCollection(BaseHandler):
+    @BaseHandler.transport_security_check("unauth")
+    @BaseHandler.unauthenticated
+    @inlineCallbacks
+    def get(self):
+        """
+        Get all the receivers.
+        """
         ret = yield GLApiCache.get('receivers', self.request.language,
                                    get_public_receiver_list, self.request.language)
-        self.finish(ret)
+        self.write(ret)

@@ -1,154 +1,239 @@
 <div class="row">
   <div class="col-md-6">
-    <p>
-      <b><span data-translate>You're running GlobaLeaks version</span> {{admin.node.version}}</b>
-    </p>
-
-    <p>
-      <span data-translate>This section contains settings that may break your installation. Please refer to the</span>
-      <a href="https://github.com/globaleaks/GlobaLeaks/wiki/Advanced-configuration" target="_blank" rel="noreferrer" data-translate>Advanced configuration</a>.
-    </p>
+    <label><span data-translate>Software version:</span> {{admin.node.version}}</label>
 
     <div class="form-group">
-      <label data-translate>Exception mail address</label>
-      <input class="form-control" data-ng-model="admin.node.exception_email" name="email" type="text" data-ng-pattern="email_regexp" />
-      <p class="has-error" data-ng-show="advancedForm.email.$error.pattern">
-        <span data-translate>Invalid email address</span>
-      </p>
-    </div>
-
-    <div class="form-group">
-      <label data-translate>File size limit (in Megabytes)</label>
-      <input class="form-control" data-ng-model="admin.node.maximum_filesize" type="text" />
-    </div>
-
-    <div class="form-group">
-      <label data-translate>Text size limit (in bytes)</label>
-      <input class="form-control" data-ng-model="admin.node.maximum_textsize" type="text" />
+      <label>
+        <input data-ng-model="admin.node.disable_submissions" type="checkbox" />
+        <span data-translate>Disable submissions</span>
+      </label>
     </div>
 
     <div class="form-group">
       <label>
-        <input data-ng-model="admin.node.allow_unencrypted" ng-click="open_modal_allow_unencrypted()" type="checkbox" />
-        <span data-translate>Enable insecure configuration without PGP encryption.</span>
+        <input data-ng-model="admin.node.allow_unencrypted" data-ng-click="open_modal_allow_unencrypted()" type="checkbox" />
+        <span data-translate>Enable insecure configuration without PGP encryption</span>
       </label>
-      <div data-ng-show="admin.node.allow_unencrypted">
+      <div data-ng-if="admin.node.allow_unencrypted">
         <span class="label label-danger" data-translate>Danger</span>
-        <span data-translate>By enabling this option, the system will be storing the submitted files unecrypted on your node.</span>
+        <span data-translate>By enabling this option, the system will be storing the submitted files unencrypted on your server.</span>
         <span data-translate>This happens whenever encryption is unavailable.</span>
       </div>
     </div>
 
     <div class="form-group">
       <label>
-        <input data-ng-model="admin.node.enable_custom_privacy_badge" type="checkbox" />
-        <span data-translate>Enable custom privacy badge</span>
+        <input data-ng-model="admin.node.disable_encryption_warnings" type="checkbox" />
+       <span data-translate>Disable messages that warn of missing encryption</span>
       </label>
-      <div data-ng-show="admin.node.enable_custom_privacy_badge">
-        <span class="label label-info" data-translate>Enabled</span>
-      </div>
-    </div>
-
-    <div class="form-group" ng-show="admin.node.enable_custom_privacy_badge">
-      <label data-translate>Custom Privacy Badge</label>
-      <label data-translate>(TBB condition)</label>
-      <div>
-        <input class="form-control" data-ng-model="admin.node.custom_privacy_badge_tbb" type="text" />
-      </div>
-    </div>
-
-    <div class="form-group" ng-show="admin.node.enable_custom_privacy_badge">
-      <label data-translate>Custom Privacy Badge</label>
-      <label data-translate>(Tor condition)</label>
-      <div>
-        <input class="form-control" data-ng-model="admin.node.custom_privacy_badge_tor" type="text" />
-      </div>
-    </div>
-
-    <div class="form-group" ng-show="admin.node.enable_custom_privacy_badge">
-      <label data-translate>Custom Privacy Badge</label>
-      <label data-translate>(Traditional Browser)</label>
-      <div>
-        <input class="form-control" data-ng-model="admin.node.custom_privacy_badge_none" type=text" />
+      <div data-ng-if="admin.node.disable_encryption_warnings">
+        <span class="label label-danger" data-translate>Danger</span>
+        <span data-translate>This setting affects the security of the users and must not be used in production.</span>
       </div>
     </div>
 
     <div class="form-group">
       <label>
-        <input data-ng-model="admin.node.postpone_superpower" type="checkbox" />
-        <span data-translate>Permit Receivers to postpone expiration date of the Tips</span>
+        <input data-ng-model="admin.node.allow_iframes_inclusion" type="checkbox" />
+        <span data-translate>Allow other websites to include the platform inside iframes</span>
       </label>
-      <div data-ng-show="admin.node.postpone_superpower">
-        <span class="label label-info" data-translate>Enabled</span>
-        <span data-translate>Receivers will be able to postpone Tips expiration.</span>
+      <div data-ng-if="admin.node.allow_iframes_inclusion">
+        <span class="label label-danger" data-translate>Danger</span>
+        <span data-translate>By enabling this option, you are allowing other websites to include the platform inside iframes; this could potentially be used to endanger the platform or intercept users' communications</span>
       </div>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.can_postpone_expiration" type="checkbox" />
+        <span data-translate>Allow recipients to postpone expiration date of the submission</span>
+      </label>
     </div>
 
     <div class="form-group">
       <label>
         <input data-ng-model="admin.node.can_delete_submission" type="checkbox" />
-        <span data-translate>Permit Receivers to delete Tips</span>
+        <span data-translate>Allow recipients to delete submissions</span>
       </label>
-      <div data-ng-show="admin.node.can_delete_submission">
-        <span class="label label-info" data-translate>Enabled</span>
-	<span data-translate>Receivers will be able to delete Tips and their content.</span>
-      </div>
     </div>
 
-    <!--
-
-    Commented out as the feature it is not implemented/merged in the backend.
-    The code on the GLClient is complete and putted here in order to allow user to translate the feature texts on transifex
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.can_grant_permissions" type="checkbox" />
+        <span data-translate>Allow recipients to grant permissions to whistleblowers on specific submissions</span>
+      </label>
+    </div>
 
     <div class="form-group">
       <label>
         <input data-ng-model="admin.node.indexing" type="checkbox" />
         <span data-translate>Enable search engines indexing</span>
       </label>
-      <div data-ng-show="admin.node.">
+      <div data-ng-if="admin.node.indexing">
         <span class="label label-info" data-translate>Enabled</span>
-        <span data-translate>Search engine spiders will be allowed to spider the application.</span>
+        <span data-translate>Search engine spiders will be allowed to index the application.</span>
       </div>
     </div>
-
-    -->
 
     <div class="form-group">
       <label>
         <input data-ng-model="admin.node.ahmia" type="checkbox" />
         <span data-translate>Enable Ahmia publishing</span>
       </label>
-      <div data-ng-show="admin.node.ahmia">
+      <div data-translate>By enabling this option, server metadata will be published using Ahmia JSON format.</div>
+      <div data-ng-if="admin.node.ahmia">
         <span class="label label-info" data-translate>Enabled</span>
-        <span data-translate>Node metadata will be now published using Ahmia JSON format.</span>
+      </div>
+    </div>
+
+    <div class="form-group" data-ng-if="!admin.node.disable_privacy_badge">
+      <label>
+        <input data-ng-model="admin.node.enable_custom_privacy_badge" type="checkbox" />
+        <span data-translate>Enable custom privacy panel</span>
+      </label>
+      <div data-ng-if="admin.node.enable_custom_privacy_badge">
+        <span class="label label-info" data-translate>Enabled</span>
+      </div>
+    </div>
+
+    <div class="form-group" data-ng-if="!admin.node.disable_privacy_badge && admin.node.enable_custom_privacy_badge">
+      <label data-translate>Custom privacy panel</label>
+      <label>(<span data-translate>Text shown when the whistleblower is using Tor</span>)</label>
+      <div>
+        <input class="form-control" data-ng-model="admin.node.custom_privacy_badge_tor" type="text" />
+      </div>
+    </div>
+
+    <div class="form-group" data-ng-if="!admin.node.disable_privacy_badge && admin.node.enable_custom_privacy_badge">
+      <label data-translate>Custom privacy panel</label>
+      <label>(<span data-translate>Text shown when the whistleblower is not using Tor</span>)</label>
+      <div>
+        <input class="form-control" data-ng-model="admin.node.custom_privacy_badge_none" type="text" />
       </div>
     </div>
 
     <div class="form-group">
       <label>
         <input data-ng-model="admin.node.disable_privacy_badge" type="checkbox" />
-        <span data-translate>Disable the privacy badge</span>
+        <span data-translate>Disable the privacy panel</span>
+      </label>
+    </div>
+
+    <div class="form-group" data-ng-if="!admin.node.disable_security_awareness_badge">
+      <label data-translate>Security awareness panel title</label>
+      <div>
+        <input class="form-control" data-ng-model="admin.node.security_awareness_title" type="text" />
+      </div>
+    </div>
+
+    <div class="form-group" data-ng-if="!admin.node.disable_security_awareness_badge">
+      <label data-translate>Security awareness panel text</label>
+      <div>
+        <textarea class="form-control" data-ng-model="admin.node.security_awareness_text"></textarea>
+      </div>
+    </div>
+
+    <div class="form-group" data-ng-if="!admin.node.disable_security_awareness_badge">
+      <label>
+        <input data-ng-model="admin.node.disable_security_awareness_questions" type="checkbox">
+        <span data-translate>Disable the security awareness panel questions</span>
       </label>
     </div>
 
     <div class="form-group">
       <label>
         <input data-ng-model="admin.node.disable_security_awareness_badge" type="checkbox" />
-        <span data-translate>Disable the security awareness badge</span>
+        <span data-translate>Disable the security awareness panel</span>
       </label>
     </div>
 
     <div class="form-group">
-      <a href="#/admin/fields">
-        <span data-translate>Preconfigure Fields Templates</span>
-      </a>
+      <label>
+        <input data-ng-model="admin.node.disable_key_code_hint" type="checkbox" />
+        <span data-translate>Disable the key code hint</span>
+      </label>
     </div>
 
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.disable_donation_panel" type="checkbox" />
+        <span data-translate>Disable the donation panel</span>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.enable_captcha" type="checkbox" />
+        <span data-translate>Enable CAPTCHA mechanism</span>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.enable_proof_of_work" type="checkbox" />
+        <span data-translate>Enable proof of work mechanism</span>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.simplified_login" type="checkbox" />
+        <span data-translate>Enable simplified login for recipients</span>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label data-translate>Limit for single-line inputs, in characters</label>
+      <input class="form-control" data-ng-model="admin.node.maximum_namesize" type="number" />
+    </div>
+
+    <div class="form-group">
+      <label data-translate>Limit for multi-line inputs, in characters</label>
+      <input class="form-control" data-ng-model="admin.node.maximum_textsize" type="number" />
+    </div>
+
+    <div class="form-group">
+      <label>
+        <span data-translate>Size limit for file attachments</span>
+        <span data-translate>in megabytes</span>
+      </label>
+      <input class="form-control" data-ng-model="admin.node.maximum_filesize" type="number" />
+    </div>
+
+    <div class="form-group">
+      <label data-translate>Minimum time before accepting a submission, in seconds</label>
+      <input class="form-control" data-ng-model="admin.node.submission_minimum_delay" type="number" />
+    </div>
+
+    <div class="form-group">
+      <label data-translate>Maximum submission duration, in seconds</label>
+      <input class="form-control" data-ng-model="admin.node.submission_maximum_ttl" type="number" />
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.basic_auth" type="checkbox" />
+        <span data-translate>Enable HTTP Basic Authentication to limit platform access</span>
+      </label>
+      <div class="well well-lg" data-ng-if="admin.node.basic_auth">
+        <label data-translate>Username</label>
+        <input class="form-control" name="username" data-ng-model="admin.node.basic_auth_username" type="text" autocomplete="off" />
+        <label data-translate>Password</label>
+        <input class="form-control" name="password" data-ng-model="admin.node.basic_auth_password" type="text" autocomplete="off" />
+        <span class="label label-danger" data-translate>Danger</span>
+        <span data-translate>This feature keeps regular people from visiting the platform while it is still under development and should not be used for security purposes. The input password is stored in plaintext on the server.</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input data-ng-model="admin.node.enable_experimental_features" type="checkbox" />
+        <span data-translate>Enable experimental features</span>
+      </label>
+      <div data-ng-if="admin.node.enable_experimental_features">
+        <span class="label label-danger" data-translate>Warning</span>
+        <span data-translate>The experimental features may be less stable or even not work at all; enable this option at your own risk. Support for these features may vary and they may be removed in the future.</span>
+      </div>
+    </div>
   </div>
 </div>
-
-
-
-
-
-

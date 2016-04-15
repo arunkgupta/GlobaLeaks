@@ -1,199 +1,239 @@
 # -*- encoding: utf-8 -*-
 """
-Implementation of BaseHandler, the Cyclone class RequestHandler extended with
+Implementation of BaseHandler, the Cyclone class RequestHandler postponeed with
 our needs.
 """
 
+import base64
 import collections
 import httplib
 import json
-import logging
+import mimetypes
+import os
 import re
 import sys
+import time
 import types
 
-from cgi import parse_header
-from cryptography.hazmat.primitives.constant_time import bytes_eq
 from StringIO import StringIO
 
-from twisted.internet import fdesc
-from twisted.internet.defer import inlineCallbacks, returnValue
+from twisted.internet import fdesc, reactor
+from twisted.internet.defer import inlineCallbacks
 from twisted.python.failure import Failure
 
-from cyclone import escape, httputil
-from cyclone.escape import native_str, parse_qs_bytes
+from cyclone import escape, httputil, web
+from cyclone.escape import native_str
 from cyclone.httpserver import HTTPConnection, HTTPRequest, _BadRequestException
-from cyclone.web import RequestHandler, HTTPError, HTTPAuthenticationRequired, StaticFileHandler, RedirectHandler
+from cyclone.web import RequestHandler, HTTPError, HTTPAuthenticationRequired, RedirectHandler
 
-from globaleaks.anomaly import incoming_event_monitored, outcome_event_monitored, EventTrack
-from globaleaks.rest import errors
-from globaleaks.settings import GLSetting
-from globaleaks.security import GLSecureTemporaryFile
-from globaleaks.utils.utility import log, log_remove_escapes, log_encode_html, datetime_now, deferred_sleep
-from globaleaks.utils.mailutils import mail_exception
-
-def validate_host(host_key):
-    """
-    validate_host checks in the GLSetting list of valid 'Host:' values
-    and if matched, return True, else return False
-    Is used by all the Web handlers inherit from Cyclone
-    """
-    # hidden service has not a :port
-    if len(host_key) == 22 and host_key.endswith('.onion'):
-        return True
-
-    # strip eventually port
-    hostchunk = str(host_key).split(":")
-    if len(hostchunk) == 2:
-        host_key = hostchunk[0]
-
-    if host_key in GLSetting.accepted_hosts:
-        return True
-
-    log.debug("Error in host requested: %s not accepted between: %s " %
-              (host_key, GLSetting.accepted_hosts))
-
-    return False
+from globaleaks.event import track_handler
+from globaleaks.rest import errors, requests
+from globaleaks.settings import GLSettings
+from globaleaks.security import GLSecureTemporaryFile, directory_traversal_check, generateRandomKey, hash_password
+from globaleaks.utils.mailutils import mail_exception_handler, send_exception_email
+from globaleaks.utils.tempdict import TempDict
+from globaleaks.utils.utility import log, log_encode_html, datetime_now, deferred_sleep, randint
 
 
-class GLHTTPServer(HTTPConnection):
-    file_upload = False
+HANDLER_EXEC_TIME_THRESHOLD = 30
 
+GLUploads = {}
+GLSessions = TempDict(timeout=GLSettings.authentication_lifetime)
+
+# https://github.com/globaleaks/GlobaLeaks/issues/1601
+mimetypes.add_type('image/svg+xml', '.svg')
+mimetypes.add_type('application/vnd.ms-fontobject', '.eot')
+mimetypes.add_type('application/x-font-ttf', '.ttf')
+mimetypes.add_type('application/woff', '.woff')
+mimetypes.add_type('application/woff2', '.woff2')
+
+class GLSession(object):
+    def __init__(self, user_id, user_role, user_status):
+        self.id = generateRandomKey(42)
+        self.user_id = user_id
+        self.user_role = user_role
+        self.user_status = user_status
+
+        GLSessions.set(self.id, self)
+
+    def getTime(self):
+        return self.expireCall.getTime()
+
+    def __repr__(self):
+        return "%s %s expire in %s" % (self.user_role, self.user_id, self.expireCall)
+
+
+class GLHTTPConnection(HTTPConnection):
     def __init__(self):
         self.uploaded_file = {}
-
-    def rawDataReceived(self, data):
-        if self.content_length is not None:
-            data, rest = data[:self.content_length], data[self.content_length:]
-            self.content_length -= len(data)
-        else:
-            rest = ''
-
-        self._contentbuffer.write(data)
-        if self.content_length == 0 and self._contentbuffer is not None:
-            tmpbuf = self._contentbuffer
-            self.content_length = self._contentbuffer = None
-            self.setLineMode(rest)
-            tmpbuf.seek(0, 0)
-            if self.file_upload:
-                self._on_request_body(self.uploaded_file)
-                self.file_upload = False
-                self.uploaded_file = {}
-            else:
-                self._on_request_body(tmpbuf.read())
 
     def _on_headers(self, data):
         try:
             data = native_str(data.decode("latin1"))
             eol = data.find("\r\n")
             start_line = data[:eol]
+
             try:
                 method, uri, version = start_line.split(" ")
             except ValueError:
                 raise _BadRequestException("Malformed HTTP request line")
+
             if not version.startswith("HTTP/"):
                 raise _BadRequestException(
                     "Malformed HTTP version in HTTP Request-Line")
-            headers = httputil.HTTPHeaders.parse(data[eol:])
+
+            try:
+                headers = httputil.HTTPHeaders.parse(data[eol:])
+                content_length = int(headers.get("Content-Length", 0))
+            except ValueError:
+                raise _BadRequestException(
+                    "Malformed Content-Length header")
+
             self._request = HTTPRequest(
                 connection=self, method=method, uri=uri, version=version,
                 headers=headers, remote_ip=self._remote_ip)
 
-            try:
-                self.content_length = int(headers.get("Content-Length", 0))
-            except ValueError:
-                raise _BadRequestException("Malformed Content-Length header")
+            if content_length:
+                megabytes = int(content_length) / (1024 * 1024)
+                if megabytes > GLSettings.memory_copy.maximum_filesize:
+                    raise _BadRequestException("Request exceeded size limit %d" %
+                                               GLSettings.memory_copy.maximum_filesize)
 
-            # we always use secure temporary files in case of large json or file uploads
-            if self.content_length < 100000 and self._request.headers.get("Content-Disposition") is None:
-                self._contentbuffer = StringIO('')
-            else:
-                self._contentbuffer = GLSecureTemporaryFile(GLSetting.tmp_upload_path)
+                if headers.get("Expect") == "100-continue":
+                    self.transport.write("HTTP/1.1 100 (Continue)\r\n\r\n")
 
-            if headers.get("Expect") == "100-continue":
-                self.transport.write("HTTP/1.1 100 (Continue)\r\n\r\n")
+                if content_length < 100000:
+                    self._contentbuffer = StringIO()
+                else:
+                    self._contentbuffer = GLSecureTemporaryFile(GLSettings.tmp_upload_path)
 
-            c_d_header = self._request.headers.get("Content-Disposition")
-            if c_d_header is not None:
-                key, pdict = parse_header(c_d_header)
-                if key != 'attachment' or 'filename' not in pdict:
-                    raise _BadRequestException("Malformed Content-Disposition header")
-
-                self.file_upload = True
-                self.uploaded_file['filename'] = pdict['filename']
-                self.uploaded_file['content_type'] = self._request.headers.get("Content-Type",
-                                                                               'application/octet-stream')
-
-                self.uploaded_file['body'] = self._contentbuffer
-                self.uploaded_file['body_len'] = int(self.content_length)
-                self.uploaded_file['body_filepath'] = self._contentbuffer.filepath
-
-            megabytes = int(self.content_length) / (1024 * 1024)
-
-            if self.file_upload:
-                limit_type = "upload"
-                limit = GLSetting.memory_copy.maximum_filesize
-            else:
-                limit_type = "json"
-                limit = 1000000 # 1MB fixme: add GLSetting.memory_copy.maximum_jsonsize
-                # is 1MB probably too high. probably this variable must be in kB
-
-            # less than 1 megabytes is always accepted
-            if megabytes > limit:
-                log.err("Tried %s request larger than expected (%dMb > %dMb)" %
-                        (limit_type,
-                         megabytes,
-                         limit))
-
-                # In HTTP Protocol errors need to be managed differently than handlers
-                raise errors.HTTPRawLimitReach
-
-            if self.content_length > 0:
+                self.content_length = content_length
                 self.setRawMode()
                 return
-            elif self.file_upload:
-                self._on_request_body(self.uploaded_file)
-                self.file_upload = False
-                self.uploaded_file = {}
-                return
 
             self.request_callback(self._request)
-        except Exception as exception:
-            log.msg("Malformed HTTP request from %s: %s" % (self._remote_ip, exception))
-            log.exception(exception)
-            if self._request:
-                self._request.finish()
-            if self.transport:
-                self.transport.loseConnection()
-
-    def _on_request_body(self, data):
-        try:
-            self._request.body = data
-            content_type = self._request.headers.get("Content-Type", "")
-            if self._request.method in ("POST", "PATCH", "PUT"):
-                if content_type.startswith("application/x-www-form-urlencoded") and self.content_length < GLSetting.www_form_urlencoded_maximum_size:
-                    arguments = parse_qs_bytes(native_str(self._request.body))
-                    for name, values in arguments.iteritems():
-                        values = [v for v in values if v]
-                        if values:
-                            self._request.arguments.setdefault(name,
-                                                               []).extend(values)
-                elif content_type.startswith("application/x-www-form-urlencoded"):
-                    raise errors.InvalidInputFormat("content type application/x-www-form-urlencoded not supported")
-                elif content_type.startswith("multipart/form-data"):
-                    raise errors.InvalidInputFormat("content type multipart/form-data not supported")
-            self.request_callback(self._request)
-        except Exception as exception:
-            log.msg("Malformed HTTP request from %s: %s" % (self._remote_ip, exception))
-            log.exception(exception)
-            if self._request:
-                self._request.finish()
-            if self.transport:
-                self.transport.loseConnection()
+        except _BadRequestException as e:
+            log.msg("Exception while handling HTTP request from %s: %s" % (self._remote_ip, e))
+            self.transport.loseConnection()
 
 
 class BaseHandler(RequestHandler):
-    xsrf_cookie_name = "XSRF-TOKEN"
+    serialize_lists = True
+    handler_exec_time_threshold = HANDLER_EXEC_TIME_THRESHOLD
+    filehandler = False
+
+    def __init__(self, application, request, **kwargs):
+        RequestHandler.__init__(self, application, request, **kwargs)
+
+        self.name = type(self).__name__
+
+        self.handler_time_analysis_begin()
+        self.handler_request_logging_begin()
+
+        self.req_id = GLSettings.requests_counter
+        GLSettings.requests_counter += 1
+
+        self.request.start_time = datetime_now()
+
+        self.request.request_type = None
+        if 'import' in self.request.arguments:
+            self.request.request_type = 'import'
+        elif 'export' in self.request.arguments:
+            self.request.request_type = 'export'
+
+        self.request.language = self.request.headers.get('GL-Language', GLSettings.memory_copy.default_language)
+
+    @staticmethod
+    def authenticated(role):
+        """
+        Decorator for authenticated sessions.
+        If the user is not authenticated, return a http 412 error.
+        """
+        def wrapper(method_handler):
+            def call_handler(cls, *args, **kwargs):
+                """
+                If not yet auth, is redirected
+                If is logged with the right account, is accepted
+                If is logged with the wrong account, is rejected with a special message
+                """
+                if GLSettings.memory_copy.basic_auth:
+                    cls.basic_auth()
+
+                if not cls.current_user:
+                    raise errors.NotAuthenticated
+
+                if role == '*' or role == cls.current_user.user_role:
+                    log.debug("Authentication OK (%s)" % cls.current_user.user_role)
+                    return method_handler(cls, *args, **kwargs)
+
+                raise errors.InvalidAuthentication
+
+            return call_handler
+
+        return wrapper
+
+    @staticmethod
+    def unauthenticated(method_handler):
+        """
+        Decorator for unauthenticated requests.
+        If the user is logged in an authenticated sessions it does refresh the session.
+        """
+        def call_handler(cls, *args, **kwargs):
+            if GLSettings.memory_copy.basic_auth:
+                cls.basic_auth()
+
+            return method_handler(cls, *args, **kwargs)
+
+        return call_handler
+
+    @staticmethod
+    def transport_security_check(role):
+        """
+        Decorator for enforcing the required transport security: Tor/HTTPS
+        """
+        def wrapper(method_handler):
+            def call_handler(cls, *args, **kwargs):
+                """
+                GLSettings contain the copy of the latest admin configuration, this
+                enhance performance instead of searching in te DB at every handler
+                connection.
+                """
+                tor2web_roles = ['whistleblower', 'receiver', 'admin', 'custodian', 'unauth']
+
+                using_tor2web = cls.check_tor2web()
+
+                if using_tor2web and not GLSettings.memory_copy.accept_tor2web_access[role]:
+                    log.err("Denied request on Tor2web for role %s and resource '%s'" %
+                            (role, cls.request.uri))
+                    raise errors.TorNetworkRequired
+
+                if using_tor2web:
+                    log.debug("Accepted request on Tor2web for role '%s' and resource '%s'" %
+                              (role, cls.request.uri))
+
+                return method_handler(cls, *args, **kwargs)
+
+            return call_handler
+
+        return wrapper
+
+    def basic_auth(self):
+        msg = None
+        if "Authorization" in self.request.headers:
+            try:
+                auth_type, data = self.request.headers["Authorization"].split()
+                usr, pwd = base64.b64decode(data).split(":", 1)
+                if auth_type != "Basic" or \
+                    usr != GLSettings.memory_copy.basic_auth_username or \
+                    pwd != GLSettings.memory_copy.basic_auth_password:
+                    msg = "Authentication failed"
+            except AssertionError:
+                msg = "Authentication failed"
+        else:
+            msg = "Authentication required"
+
+        if msg is not None:
+            raise web.HTTPAuthenticationRequired(log_message=msg, auth_type="Basic", realm="")
 
     def set_default_headers(self):
         """
@@ -204,10 +244,6 @@ class BaseHandler(RequestHandler):
         """
         self.request.start_time = datetime_now()
 
-        # just reading the property is enough to
-        # set the cookie as a side effect.
-        self.xsrf_token
-
         # to avoid version attacks
         self.set_header("Server", "globaleaks")
 
@@ -215,54 +251,56 @@ class BaseHandler(RequestHandler):
         self.set_header("X-Content-Type-Options", "nosniff")
         self.set_header("X-XSS-Protection", "1; mode=block")
 
-        # to mitigate information leakage on Browser/Proxy Cache
         self.set_header("Cache-control", "no-cache, no-store, must-revalidate")
         self.set_header("Pragma", "no-cache")
+
         self.set_header("Expires", "-1")
 
+        # to avoid information leakage via referrer
+        self.set_header("Content-Security-Policy", "referrer no-referrer")
+
         # to avoid Robots spidering, indexing, caching
-        self.set_header("X-Robots-Tag", "noindex")
+        if not GLSettings.memory_copy.allow_indexing:
+            self.set_header("X-Robots-Tag", "noindex")
 
-        # to mitigate clickjaking attacks on iframes allwing only same origin
+        # to mitigate clickjaking attacks on iframes allowing only same origin
         # same origin is needed in order to include svg and other html <object>
-        self.set_header("X-Frame-Options", "sameorigin")
+        if not GLSettings.memory_copy.allow_iframes_inclusion:
+            self.set_header("X-Frame-Options", "sameorigin")
 
-        lang = self.request.headers.get('GL-Language', None)
-
-        if not lang:
-            # before was used the Client language. but shall be unsupported
-            # lang = self.request.headers.get('Accepted-Language', None)
-            lang = GLSetting.memory_copy.default_language
-
-        self.request.language = lang
-
-    def check_xsrf_cookie(self):
+    @staticmethod
+    def validate_host(host_key):
         """
-            Override needed to change name of header name
+        validate_host checks in the GLSettings list of valid 'Host:' values
+        and if matched, return True, else return False
+        Is used by all the Web handlers inherit from Cyclone
         """
-        token = self.request.headers.get("X-XSRF-TOKEN")
-        if not token:
-            token = self.get_argument('xsrf-token', default=None)
-        if not token:
-            raise HTTPError(403, "X-XSRF-TOKEN argument missing from POST")
+        # strip eventually port
+        hostchunk = str(host_key).split(":")
+        if len(hostchunk) == 2:
+            host_key = hostchunk[0]
 
-        # This is a constant time comparison provided by cryptography package
-        if not bytes_eq(self.xsrf_token.encode('utf-8'), token.encode('utf-8')):
-            raise HTTPError(403, "XSRF cookie does not match POST argument")
-        # utf-8 encoding is used because suggested here:
-        # http://stackoverflow.com/questions/7585307/python-hashlib-problem-typeerror-unicode-objects-must-be-encoded-before-hashin
+        # hidden service has not a :port
+        if re.match(r'^[0-9a-z]{16}\.onion$', host_key):
+            return True
 
+        if host_key != '' and host_key in GLSettings.accepted_hosts:
+            return True
+
+        log.debug("Error in host requested: %s not accepted between: %s " %
+                  (host_key, GLSettings.accepted_hosts))
+
+        return False
 
     @staticmethod
     def validate_python_type(value, python_type):
         """
-        Return True if the python class instantiates the python_type given,
-            'int' fields are accepted also as 'unicode' but cast on base 10
-            before validate them
-            'bool' fields are accepted also as 'true' 'false' because this
-            happen on angular.js
+        Return True if the python class instantiates the specified python_type.
         """
         if value is None:
+            return True
+
+        if python_type == requests.SkipSpecificValidation:
             return True
 
         if python_type == int:
@@ -279,44 +317,46 @@ class BaseHandler(RequestHandler):
         return isinstance(value, python_type)
 
     @staticmethod
-    def validate_GLtype(value, gl_type):
+    def validate_regexp(value, type):
         """
         Return True if the python class matches the given regexp.
         """
-        if isinstance(value, (str, unicode)):
-            return bool(re.match(gl_type, value))
-        else:
+        try:
+            value = unicode(value)
+        except Exception:
             return False
 
+        return bool(re.match(type, value))
+
     @staticmethod
-    def validate_type(value, gl_type):
+    def validate_type(value, type):
         # if it's callable, than assumes is a primitive class
-        if callable(gl_type):
-            retval = BaseHandler.validate_python_type(value, gl_type)
+        if callable(type):
+            retval = BaseHandler.validate_python_type(value, type)
             if not retval:
-                log.err("-- Invalid python_type, in [%s] expected %s" % (value, gl_type))
+                log.err("-- Invalid python_type, in [%s] expected %s" % (value, type))
             return retval
         # value as "{foo:bar}"
-        elif isinstance(gl_type, collections.Mapping):
-            retval = BaseHandler.validate_jmessage(value, gl_type)
+        elif isinstance(type, collections.Mapping):
+            retval = BaseHandler.validate_jmessage(value, type)
             if not retval:
-                log.err("-- Invalid JSON/dict [%s] expected %s" % (value, gl_type))
+                log.err("-- Invalid JSON/dict [%s] expected %s" % (value, type))
             return retval
         # regexp
-        elif isinstance(gl_type, str):
-            retval = BaseHandler.validate_GLtype(value, gl_type)
+        elif isinstance(type, str):
+            retval = BaseHandler.validate_regexp(value, type)
             if not retval:
-                log.err("-- Failed Match in regexp [%s] against %s" % (value, gl_type))
+                log.err("-- Failed Match in regexp [%s] against %s" % (value, type))
             return retval
         # value as "[ type ]"
-        elif isinstance(gl_type, collections.Iterable):
+        elif isinstance(type, collections.Iterable):
             # empty list is ok
             if len(value) == 0:
                 return True
             else:
-                retval = all(BaseHandler.validate_type(x, gl_type[0]) for x in value)
+                retval = all(BaseHandler.validate_type(x, type[0]) for x in value)
                 if not retval:
-                    log.err("-- List validation failed [%s] of %s" % (value, gl_type))
+                    log.err("-- List validation failed [%s] of %s" % (value, type))
                 return retval
         else:
             raise AssertionError
@@ -335,39 +375,58 @@ class BaseHandler(RequestHandler):
         message_type: the GLType class it should match.
         """
         if isinstance(message_template, dict):
-            valid_jmessage = {}
-            for key in message_template.keys():
-                if key not in jmessage:
-                    log.err('validate_message: key %s not in %s' % (key, jmessage))
-                    raise errors.InvalidInputFormat('wrong schema: missing %s' % key)
-                else:
-                    valid_jmessage[key] = jmessage[key]
+            success_check = 0
+            keys_to_strip = []
+            for key, value in jmessage.iteritems():
+                if key not in message_template:
+                    # strip whatever is not validated
+                    #
+                    # reminder: it's not possible to raise an exception for the
+                    # in case more values are presenct because it's normal that the
+                    # client will send automatically more data.
+                    #
+                    # e.g. the client will always send 'creation_date' attributs of
+                    #      objects and attributes like this are present generally only
+                    #      from the second request on.
+                    #
+                    keys_to_strip.append(key)
+                    continue
 
-            if GLSetting.loglevel == "DEBUG":
-                # check if wrong keys are reaching the GLBackend, they are
-                # stripped in the previous loop, because valid_jmessage is returned
-                for double_k in jmessage.keys():
-                    if double_k not in message_template.keys():
-                        log.err("[!?] validate_message: key %s not expected" % double_k)
+                if not BaseHandler.validate_type(value, message_template[key]):
+                    log.err("Received key %s: type validation fail " % key)
+                    raise errors.InvalidInputFormat("Key (%s) type validation failure" % key)
+                success_check += 1
 
-            jmessage = valid_jmessage
+            for key in keys_to_strip:
+                del jmessage[key]
 
             for key, value in message_template.iteritems():
+                if key not in jmessage.keys():
+                    log.debug("Key %s expected but missing!" % key)
+                    log.debug("Received schema %s - Expected %s" %
+                              (jmessage.keys(), message_template.keys()))
+                    raise errors.InvalidInputFormat("Missing key %s" % key)
+
                 if not BaseHandler.validate_type(jmessage[key], value):
-                    raise errors.InvalidInputFormat("REST integrity check 1, fail in %s" % key)
+                    log.err("Expected key: %s type validation failure" % key)
+                    raise errors.InvalidInputFormat("Key (%s) double validation failure" % key)
+                success_check += 1
 
-            for key, value in jmessage.iteritems():
-                if not BaseHandler.validate_type(value, message_template[key]):
-                    raise errors.InvalidInputFormat("REST integrity check 2, fail in %s" % key)
-
-            return True
+            if success_check == len(message_template.keys()) * 2:
+                return True
+            else:
+                log.err("Success counter double check failure: %d" % success_check)
+                raise errors.InvalidInputFormat("Success counter double check failure")
 
         elif isinstance(message_template, list):
-            return all(BaseHandler.validate_type(x, message_template[0]) for x in jmessage)
+            ret = all(BaseHandler.validate_type(x, message_template[0]) for x in jmessage)
+            if not ret:
+                raise errors.InvalidInputFormat("Not every element in %s is %s" %
+                                                (jmessage, message_template[0]))
+            return True
 
         else:
             raise errors.InvalidInputFormat("invalid json massage: expected dict or list")
-
 
     @staticmethod
     def validate_message(message, message_template):
@@ -379,216 +438,176 @@ class BaseHandler(RequestHandler):
         if BaseHandler.validate_jmessage(jmessage, message_template):
             return jmessage
 
-
-    def output_stripping(self, message, message_template):
-        """
-        @param message: the serialized dict received
-        @param message_template: the answers definition
-        @return: a dict or a list without the unwanted keys
-        """
-        pass
+        raise errors.InvalidInputFormat("Unexpected condition!?")
 
     def on_connection_close(self, *args, **kwargs):
         pass
 
     def prepare(self):
         """
-        This method is called by cyclone, and is implemented to
-        handle the POST fallback, in environment where PUT and DELETE
-        method may not be used.
-        Is used also to log the complete request, if the option is
-        command line specified
+        Here is implemented:
+          - The performance analysts
+          - the Request/Response logging
         """
-
-        # just reading the property is enough to
-        # set the cookie as a side effect.
-        self.xsrf_token
-
-        if not validate_host(self.request.host):
+        if not self.validate_host(self.request.host):
             raise errors.InvalidHostSpecified
 
-        # if 0 is infinite logging of the requests
-        if GLSetting.http_log >= 0:
-
-            GLSetting.http_log_counter += 1
-
-            try:
-                content = (">" * 15)
-                content += (" Request %d " % GLSetting.http_log_counter)
-                content += (">" * 15) + "\n\n"
-
-                content += self.request.method + " " + self.request.full_url() + "\n\n"
-
-                content += "headers:\n"
-                for k, v in self.request.headers.get_all():
-                    content += "%s: %s\n" % (k, v)
-
-                if type(self.request.body) == dict and 'body' in self.request.body:
-                    # this is needed due to cyclone hack for file uploads
-                    body = self.request.body['body'].read()
-                else:
-                    body = self.request.body
-
-                if len(body):
-                    content += "\nbody:\n" + body + "\n"
-
-                self.do_verbose_log(content)
-
-            except Exception as excep:
-                log.err("JSON logging fail (prepare): %s" % excep.message)
-                return
-
-            # save in the request the numeric ID of the request, so the answer can be correlated
-            self.globaleaks_io_debug = GLSetting.http_log_counter
-
-            if 0 < GLSetting.http_log < GLSetting.http_log_counter:
-                log.debug("Reached I/O logging limit of %d requests: disabling" % GLSetting.http_log)
-                GLSetting.http_log = -1
-
-
-    def flush(self, include_footers=False):
+    def on_finish(self):
         """
-        This method is used internally by Cyclone,
-        Cyclone specify the function on_finish but in that time the request is already flushed,
-        so overwrite flush() was the easiest way to achieve our collection.
-
-        It's here implemented to supports the I/O logging if requested
-        with the command line options --io $number_of_request_recorded
+        Here is implemented:
+          - The performance analysts
+          - the Request/Response logging
         """
+        # file uploads works on chunk basis so that we count 1 the file upload
+        # as a whole in function get_file_upload()
+        if not self.filehandler:
+            track_handler(self)
 
-        # This is the event tracker, used to keep track of the
-        # outcome of the events.
-        if not hasattr(self, '_status_code'):
-            log.debug("Developer, check this out")
-            if GLSetting.devel_mode:
-                import pdb; pdb.set_trace()
-
-        for event in outcome_event_monitored:
-            if event['handler_check'](self.request.uri) and \
-                    event['method'] == self.request.method and \
-                    event['status_checker'](self._status_code):
-                EventTrack(event, self.request.request_time())
-                # if event['anomaly_management']:
-                #    event['anomaly_management'](self.request)
-
-        if hasattr(self, 'globaleaks_io_debug'):
-            try:
-                content = ("<" * 15)
-                content += (" Response %d " % self.globaleaks_io_debug)
-                content += ("<" * 15) + "\n\n"
-                content += "status code: " + str(self._status_code) + "\n\n"
-
-                content += "headers:\n"
-                for k, v in self._headers.iteritems():
-                    content += "%s: %s\n" % (k, v)
-
-                if self._write_buffer is not None:
-                    content += "\nbody: " + str(self._write_buffer) + "\n"
-
-                self.do_verbose_log(content)
-            except Exception as excep:
-                log.err("JSON logging fail (flush): %s" % excep.message)
-                return
-
-        RequestHandler.flush(self, include_footers)
-
+        self.handler_time_analysis_end()
+        self.handler_request_logging_end()
 
     def do_verbose_log(self, content):
         """
         Record in the verbose log the content as defined by Cyclone wrappers.
+
+        This option is only available in devel mode and intentionally does not filter
+        any input/output; It should be used only for debug purposes.
         """
-        content = log_remove_escapes(content)
-        content = log_encode_html(content)
 
         try:
-            with open(GLSetting.httplogfile, 'a+') as fd:
+            with open(GLSettings.httplogfile, 'a+') as fd:
                 fdesc.writeToFD(fd.fileno(), content + "\n")
         except Exception as excep:
-            log.err("Unable to open %s: %s" % (GLSetting.httplogfile, excep))
+            log.err("Unable to open %s: %s" % (GLSettings.httplogfile, excep))
+
+    def write_chunk(self, f):
+        try:
+            chunk = f.read(GLSettings.file_chunk_size)
+            if len(chunk) != 0:
+                self.write(chunk)
+                self.flush()
+                reactor.callLater(0.01, self.write_chunk, f)
+            else:
+                f.close()
+                self.finish()
+        except:
+            f.close()
+            self.finish()
+
+    def write_file(self, filepath):
+        f = None
+
+        try:
+            f = open(filepath, "rb")
+        except IOError as srcerr:
+            log.err("Unable to open %s: %s " % (filepath, srcerr.strerror))
+
+        try:
+            reactor.callLater(0, self.write_chunk, f)
+        except:
+            if f is not None:
+                f.close()
 
     def write_error(self, status_code, **kw):
         exception = kw.get('exception')
         if exception and hasattr(exception, 'error_code'):
+            error_dict = {
+                'error_message': exception.reason,
+                'error_code': exception.error_code
+            }
 
-            error_dict = {}
-            error_dict.update({'error_message': exception.reason, 'error_code': exception.error_code})
             if hasattr(exception, 'arguments'):
                 error_dict.update({'arguments': exception.arguments})
             else:
                 error_dict.update({'arguments': []})
 
             self.set_status(status_code)
-            self.finish(error_dict)
+            self.write(error_dict)
         else:
             RequestHandler.write_error(self, status_code, **kw)
-
-    def write(self, chunk):
-        """
-        This is a monkey patch to RequestHandler to allow us to serialize also
-        json list objects.
-
-        """
-        if isinstance(chunk, types.ListType):
-            chunk = escape.json_encode(chunk)
-            RequestHandler.write(self, chunk)
-            self.set_header("Content-Type", "application/json")
-        else:
-            RequestHandler.write(self, chunk)
 
     @inlineCallbacks
     def uniform_answers_delay(self):
         """
-        @return: nothing. just put a delay to normalize a minimum
-           amount of time used by requests. this impairs time execution analysis
+        @return: nothing.
 
-        this safety measure, able to counteract some side channel attacks, is
-        automatically disabled when the option -z and -l DEBUG are present
-        (because it mean that globaleaks is runned in development mode)
+        the function perform a sleep uniforming requests to the side_channels_guard
+        defined in GLSettings.side_channels_guard in order to counteract some
+        side channel attacks.
         """
-
-        if GLSetting.loglevel == logging.DEBUG and GLSetting.devel_mode:
-            return
-
-        uniform_delay = GLSetting.delay_threshold # default 0.800
         request_time = self.request.request_time()
-        needed_diff = uniform_delay - request_time
+        needed_delay = GLSettings.side_channels_guard - request_time
 
-        if needed_diff > 0:
-            yield deferred_sleep(needed_diff)
+        if needed_delay > 0:
+            yield deferred_sleep(needed_delay)
 
     @property
     def current_user(self):
+        # Check for header based authentication
         session_id = self.request.headers.get('X-Session')
 
+        # Check for GET/POST based authentication.
         if session_id is None:
-            # Check for POST based authentication.
-            session_id = self.get_argument('x-session', default=None)
+            session_id = self.get_argument('session', default=None)
 
         if session_id is None:
             return None
 
+        return GLSessions.get(session_id)
+
+
+    def check_tor2web(self):
+        return False if self.request.headers.get('X-Tor2Web', None) is None else True
+
+
+    def get_file_upload(self):
         try:
-            session = GLSetting.sessions[session_id]
-        except KeyError:
+            if len(self.request.files) != 1:
+                raise errors.InvalidInputFormat("cannot accept more than a file upload at once")
+
+            chunk_size = len(self.request.files['file'][0]['body'])
+            total_file_size = int(self.request.arguments['flowTotalSize'][0]) if 'flowTotalSize' in self.request.arguments else chunk_size
+            flow_identifier = self.request.arguments['flowIdentifier'][0] if 'flowIdentifier' in self.request.arguments else generateRandomKey(10)
+
+            if ((chunk_size / (1024 * 1024)) > GLSettings.memory_copy.maximum_filesize or
+                (total_file_size / (1024 * 1024)) > GLSettings.memory_copy.maximum_filesize):
+                log.err("File upload request rejected: file too big")
+                raise errors.FileTooBig(GLSettings.memory_copy.maximum_filesize)
+
+            if flow_identifier not in GLUploads:
+                f = GLSecureTemporaryFile(GLSettings.tmp_upload_path)
+                GLUploads[flow_identifier] = f
+            else:
+                f = GLUploads[flow_identifier]
+
+            f.write(self.request.files['file'][0]['body'])
+
+            if 'flowChunkNumber' in self.request.arguments and 'flowTotalChunks' in self.request.arguments:
+                if self.request.arguments['flowChunkNumber'][0] != self.request.arguments['flowTotalChunks'][0]:
+                    return None
+
+            uploaded_file = {
+                'filename': self.request.files['file'][0]['filename'],
+                'content_type': self.request.files['file'][0]['content_type'],
+                'body_len': total_file_size,
+                'body_filepath': f.filepath,
+                'body': f
+            }
+
+            upload_time = time.time() - f.creation_date
+
+            track_handler(self)
+
+            return uploaded_file
+
+        except errors.FileTooBig:
+            raise  # propagate the exception
+
+        except Exception as exc:
+            log.err("Error while handling file upload %s" % exc)
             return None
-        return session
-
-    @property
-    def is_whistleblower(self):
-        if not self.current_user or not self.current_user.has_key('role'):
-            raise errors.NotAuthenticated
-
-        return self.current_user['role'] == 'wb'
-
-    @property
-    def is_receiver(self):
-        if not self.current_user or not self.current_user.has_key('role'):
-            raise errors.NotAuthenticated
-
-        return self.current_user['role'] == 'receiver'
 
     def _handle_request_exception(self, e):
-        # sys.exc_info() does not always work at this stage
         if isinstance(e, Failure):
             exc_type = e.type
             exc_value = e.value
@@ -598,7 +617,7 @@ class BaseHandler(RequestHandler):
             exc_type, exc_value, exc_tb = sys.exc_info()
 
         if isinstance(e, (HTTPError, HTTPAuthenticationRequired)):
-            if GLSetting.http_log and e.log_message:
+            if GLSettings.log_requests_responses and e.log_message:
                 string_format = "%d %s: " + e.log_message
                 args = [e.status_code, self._request_summary()] + list(e.args)
                 msg = lambda *args: string_format % args
@@ -610,89 +629,150 @@ class BaseHandler(RequestHandler):
                 return self.send_error(e.status_code, exception=e)
         else:
             log.err("Uncaught exception %s %s %s" % (exc_type, exc_value, exc_tb))
-            if GLSetting.http_log:
+            if GLSettings.log_requests_responses:
                 log.msg(e)
-            mail_exception(exc_type, exc_value, exc_tb)
+            mail_exception_handler(exc_type, exc_value, exc_tb)
             return self.send_error(500, exception=e)
 
-    def get_uploaded_file(self):
-        uploaded_file = self.request.body
+    def handler_time_analysis_begin(self):
+        self.start_time = time.time()
 
-        if not isinstance(uploaded_file, dict) or len(uploaded_file.keys()) != 5:
-            raise errors.InvalidInputFormat("Expected a dict of five keys in uploaded file")
-
-        for filekey in uploaded_file.keys():
-            if filekey not in [u'body',
-                               u'body_len',
-                               u'content_type',
-                               u'filename',
-                               u'body_filepath']:
-                raise errors.InvalidInputFormat(
-                    "Invalid JSON key in uploaded file (%s)" % filekey)
-
-        return uploaded_file
-
-
-class BaseStaticFileHandler(BaseHandler, StaticFileHandler):
-    def prepare(self):
+    def handler_time_analysis_end(self):
         """
-        This method is called by cyclone,and perform 'Host:' header
-        validation using the same 'validate_host' function used by
-        BaseHandler. but BaseHandler manage the REST API,..
-        BaseStaticFileHandler manage all the statically served files.
+        If the software is running with the option -S --stats (GLSetting.log_timing_stats)
+        then we are doing performance testing, having our mailbox spammed is not important,
+        so we just skip to report the anomaly.
         """
-        if not validate_host(self.request.host):
-            raise errors.InvalidHostSpecified
+        current_run_time = time.time() - self.start_time
+
+        if current_run_time > self.handler_exec_time_threshold:
+            error = "Handler [%s] exceeded exec threshold (of %d secs) with an execution time of %.2f seconds" % \
+                    (self.name, self.handler_exec_time_threshold, current_run_time)
+            log.err(error)
+
+            send_exception_email(error, mail_reason="Handler Time Exceeded")
+
+        if GLSettings.log_timing_stats:
+            TimingStatsHandler.log_measured_timing(self.request.method, self.request.uri, self.start_time, current_run_time)
+
+
+    def handler_request_logging_begin(self):
+        if GLSettings.devel_mode and GLSettings.log_requests_responses:
+            try:
+                content = (">" * 15)
+                content += (" Request %d " % GLSettings.requests_counter)
+                content += (">" * 15) + "\n\n"
+
+                content += self.request.method + " " + self.request.full_url() + "\n\n"
+
+                content += "request-headers:\n"
+                for k, v in self.request.headers.get_all():
+                    content += "%s: %s\n" % (k, v)
+
+                if type(self.request.body) == dict and 'body' in self.request.body:
+                    # this is needed due to cyclone hack for file uploads
+                    body = self.request.body['body'].read()
+                else:
+                    body = self.request.body
+
+                if len(body):
+                    content += "\nrequest-body:\n" + body + "\n"
+
+                self.do_verbose_log(content)
+
+            except Exception as excep:
+                log.err("HTTP Request logging fail: %s" % excep.message)
+                return
+
+    def handler_request_logging_end(self):
+        if GLSettings.devel_mode and GLSettings.log_requests_responses:
+            try:
+                content = ("<" * 15)
+                content += (" Response %d " % self.req_id)
+                content += ("<" * 15) + "\n\n"
+                content += "\nbody: " + str(self._write_buffer) + "\n"
+
+                self.do_verbose_log(content)
+            except Exception as excep:
+                log.err("HTTP Requests/Responses logging fail (end): %s" % excep.message)
+
+
+class BaseStaticFileHandler(BaseHandler):
+    def initialize(self, path=None):
+        if path is None:
+            path = GLSettings.static_path
+
+        self.root = "%s%s" % (os.path.abspath(path), os.path.sep)
+
+    def parse_url_path(self, url_path):
+        if os.path.sep != "/":
+            url_path = url_path.replace("/", os.path.sep)
+        return url_path
+
+    @BaseHandler.unauthenticated
+    @web.asynchronous
+    def get(self, path):
+        if path == '':
+            path = 'index.html'
+
+        path = self.parse_url_path(path)
+        abspath = os.path.abspath(os.path.join(self.root, path))
+
+        directory_traversal_check(self.root, abspath)
+
+        if not os.path.exists(abspath) or not os.path.isfile(abspath):
+            raise HTTPError(404)
+
+        mime_type, encoding = mimetypes.guess_type(abspath)
+        if mime_type:
+            self.set_header("Content-Type", mime_type)
+
+        self.write_file(abspath)
 
 
 class BaseRedirectHandler(BaseHandler, RedirectHandler):
-    def prepare(self):
-        """
-        Same reason of BaseStaticFileHandler
-        """
-        if not validate_host(self.request.host):
-            raise errors.InvalidHostSpecified
+    pass
 
-class GLApiCache:
 
-    memory_cache_dict = {}
+class TimingStatsHandler(BaseHandler):
+    TimingsTracker = []
 
-    @classmethod
-    @inlineCallbacks
-    def get(cls, resource_name, language, function, *args, **kwargs):
-        try:
-            if resource_name in cls.memory_cache_dict \
-                    and language in cls.memory_cache_dict[resource_name]:
-                returnValue(cls.memory_cache_dict[resource_name][language])
+    @staticmethod
+    def log_measured_timing(method, uri, start_time, run_time):
+        if not GLSettings.log_timing_stats:
+            return
 
-            value = yield function(*args, **kwargs)
-            if resource_name not in cls.memory_cache_dict:
-               cls.memory_cache_dict[resource_name] = {}
-            cls.memory_cache_dict[resource_name][language] = value
-            returnValue(value)
-        except KeyError:
-            log.debug("KeyError exception while operating on the cache; probable race")
-            returnValue(None)
+        if uri == '/s/timings':
+            return
 
-    @classmethod
-    def set(cls, resource_name, language, value):
-        try:
-            if resource_name not in GLApiCache.memory_cache_dict:
-                cls.memory_cache_dict[resource_name] = {}
+        TimingStatsHandler.TimingsTracker = \
+            TimingStatsHandler.TimingsTracker[999:] if len(TimingStatsHandler.TimingsTracker) > 999 else TimingStatsHandler.TimingsTracker
 
-            cls.memory_cache_dict[resource_name][language] = value
-        except KeyError:
-            log.debug("KeyError exception while operating on the cache; probable race")
-            returnValue(None)
-
-    @classmethod
-    def invalidate(cls, resource_name = None):
-        """
-        When a function has an update, all the language need to be
-        invalidated, because the change is still effective
-        """
-        if resource_name is None:
-            cls.memory_cache_dict = {}
+        if method == 'POST' and uri == '/token':
+            category = 'token'
+        elif method == 'PUT' and uri.startswith('/submission'):
+            category = 'submission'
+        elif method == 'POST' and uri == '/wbtip/comments':
+            category = 'comment'
+        elif method == 'JOB' and uri == 'Delivery':
+            category = 'delivery'
         else:
-            cls.memory_cache_dict.pop(resource_name, None)
+            category = 'uncategorized'
 
+        TimingStatsHandler.TimingsTracker.append({
+            'category': category,
+            'method': method,
+            'uri': uri,
+            'start_time': start_time,
+            'run_time': run_time
+        })
+
+    def get(self):
+        csv = "category,method,uri,start_time,run_time\n"
+        for measure in TimingStatsHandler.TimingsTracker:
+            csv += "%s,%s,%s,%s,%d\n" % (measure['category'],
+                                         measure['method'],
+                                         measure['uri'],
+                                         measure['start_time'],
+                                         measure['run_time'])
+        self.write(csv)

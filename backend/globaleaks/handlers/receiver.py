@@ -1,238 +1,206 @@
 # -*- coding: UTF-8
-#   receiver
-#   ********
+# receiver
+# ********
 #
 # Implement the classes handling the requests performed to /receiver/* URI PATH
 # Used by receivers to update personal preferences and access to personal data
 
 from twisted.internet.defer import inlineCallbacks
-from storm.expr import Desc
+from storm.expr import And, In
 
-from globaleaks.handlers.admin import db_get_context_fields
-from globaleaks.handlers.authentication import authenticated, transport_security_check
+from globaleaks.orm import transact, transact_ro
+from globaleaks.handlers.user import db_user_update_user
 from globaleaks.handlers.base import BaseHandler
-from globaleaks.models import Receiver, Context, ReceiverTip, ReceiverFile, Message, Node
+from globaleaks.handlers.rtip import db_postpone_expiration_date, db_delete_rtip
+from globaleaks.handlers.submission import db_get_archived_preview_schema
+from globaleaks.handlers.user import user_serialize_user
+from globaleaks.models import Receiver, ReceiverTip
 from globaleaks.rest import requests, errors
-from globaleaks.security import change_password, gpg_options_parse
-from globaleaks.settings import transact, transact_ro, GLSetting
+from globaleaks.rest.apicache import GLApiCache
+from globaleaks.settings import GLSettings
 from globaleaks.utils.structures import Rosetta, get_localized_values
-from globaleaks.utils.utility import log, acquire_bool, datetime_to_ISO8601, datetime_now
+from globaleaks.utils.utility import log, datetime_to_ISO8601
 
 # https://www.youtube.com/watch?v=BMxaLEGCVdg
-def receiver_serialize_receiver(receiver, language=GLSetting.memory_copy.default_language):
-    ret_dict = {
-        "id": receiver.id,
-        "name": receiver.name,
-        "update_date": datetime_to_ISO8601(receiver.last_update),
-        "creation_date": datetime_to_ISO8601(receiver.creation_date),
-        "can_delete_submission": receiver.can_delete_submission,
-        "username": receiver.user.username,
-        "gpg_key_info": receiver.gpg_key_info,
-        "gpg_key_fingerprint": receiver.gpg_key_fingerprint,
-        "gpg_key_remove": False,
-        "gpg_key_armor": receiver.gpg_key_armor,
-        "gpg_key_status": receiver.gpg_key_status,
-        "gpg_enable_notification": receiver.gpg_enable_notification,
-        "tip_notification" : receiver.tip_notification,
-        "file_notification" : receiver.file_notification,
-        "comment_notification" : receiver.comment_notification,
-        "message_notification" : receiver.message_notification,
-        "mail_address": receiver.mail_address,
-        "contexts": [c.id for c in receiver.contexts],
-        "password": u'',
-        "old_password": u'',
-        'language': receiver.user.language,
-        'timezone': receiver.user.timezone
-    }
+def receiver_serialize_receiver(receiver, language):
+    ret_dict = user_serialize_user(receiver.user, language)
 
-    for context in receiver.contexts:
-        ret_dict['contexts'].append(context.id)
+    ret_dict.update({
+        'can_postpone_expiration': GLSettings.memory_copy.can_postpone_expiration or receiver.can_postpone_expiration,
+        'can_delete_submission': GLSettings.memory_copy.can_delete_submission or receiver.can_delete_submission,
+        'can_grant_permissions': GLSettings.memory_copy.can_grant_permissions or receiver.can_grant_permissions,
+        'tip_notification': receiver.tip_notification,
+        'contexts': [c.id for c in receiver.contexts]
+    })
 
-    return get_localized_values(ret_dict, receiver, receiver.localized_strings, language)
+    return get_localized_values(ret_dict, receiver, receiver.localized_keys, language)
+
 
 @transact_ro
-def get_receiver_settings(store, receiver_id, language=GLSetting.memory_copy.default_language):
-    receiver = store.find(Receiver, Receiver.id == unicode(receiver_id)).one()
+def get_receiver_settings(store, receiver_id, language):
+    receiver = store.find(Receiver, Receiver.id == receiver_id).one()
 
     if not receiver:
         raise errors.ReceiverIdNotFound
 
     return receiver_serialize_receiver(receiver, language)
+
 
 @transact
-def update_receiver_settings(store, receiver_id, request, language=GLSetting.memory_copy.default_language):
-    receiver = store.find(Receiver, Receiver.id == unicode(receiver_id)).one()
-    receiver.description[language] = request['description']
+def update_receiver_settings(store, receiver_id, request, language):
+    user = db_user_update_user(store, receiver_id, request, language)
+    if not user:
+        raise errors.UserIdNotFound
 
+    receiver = store.find(Receiver, Receiver.id == receiver_id).one()
     if not receiver:
         raise errors.ReceiverIdNotFound
 
-    receiver.user.language = request.get('language', GLSetting.memory_copy.default_language)
-    receiver.user.timezone = request.get('timezone', GLSetting.memory_copy.default_timezone)
-
-    new_password = request['password']
-    old_password = request['old_password']
-
-    if len(new_password) and len(old_password):
-        receiver.user.password = change_password(receiver.user.password,
-                                                 old_password,
-                                                 new_password,
-                                                 receiver.user.salt)
-
-        if receiver.user.password_change_needed:
-            receiver.user.password_change_needed = False
-
-        receiver.user.password_change_date = datetime_now()
-
-    mail_address = request['mail_address']
-
-    if mail_address != receiver.mail_address:
-        log.info("Email change %s => %s" % (receiver.mail_address, mail_address))
-        receiver.mail_address = mail_address
-
-    receiver.tip_notification = acquire_bool(request['tip_notification'])
-    receiver.message_notification = acquire_bool(request['message_notification'])
-    receiver.comment_notification = acquire_bool(request['comment_notification'])
-    receiver.file_notification = acquire_bool(request['file_notification'])
-
-    gpg_options_parse(receiver, request)
+    receiver.tip_notification = request['tip_notification']
 
     return receiver_serialize_receiver(receiver, language)
+
+
+@transact_ro
+def get_receivertip_list(store, receiver_id, language):
+    rtip_summary_list = []
+
+    for rtip in store.find(ReceiverTip, ReceiverTip.receiver_id == receiver_id):
+        mo = Rosetta(rtip.internaltip.context.localized_keys)
+        mo.acquire_storm_object(rtip.internaltip.context)
+
+        rtip_summary_list.append({
+            'id': rtip.id,
+            'creation_date': datetime_to_ISO8601(rtip.internaltip.creation_date),
+            'last_access': datetime_to_ISO8601(rtip.last_access),
+            'update_date': datetime_to_ISO8601(rtip.internaltip.update_date),
+            'expiration_date': datetime_to_ISO8601(rtip.internaltip.expiration_date),
+            'progressive': rtip.internaltip.progressive,
+            'new': rtip.access_counter == 0 or rtip.last_access < rtip.internaltip.update_date,
+            'context_name': mo.dump_localized_key('name', language),
+            'access_counter': rtip.access_counter,
+            'file_counter': rtip.internaltip.internalfiles.count(),
+            'comment_counter': rtip.internaltip.comments.count(),
+            'message_counter': rtip.messages.count(),
+            'tor2web': rtip.internaltip.tor2web,
+            'questionnaire_hash': rtip.internaltip.questionnaire_hash,
+            'preview_schema': db_get_archived_preview_schema(store, rtip.internaltip.questionnaire_hash, language),
+            'preview': rtip.internaltip.preview,
+            'total_score': rtip.internaltip.total_score,
+            'label': rtip.label
+        })
+
+    return rtip_summary_list
+
+
+@transact
+def perform_tips_operation(store, receiver_id, operation, rtips_ids):
+    receiver = store.find(Receiver, Receiver.id == receiver_id).one()
+
+    rtips = store.find(ReceiverTip, And(ReceiverTip.receiver_id == receiver_id,
+                                        In(ReceiverTip.id, rtips_ids)))
+
+    if operation == 'postpone':
+        can_postpone_expiration = GLSettings.memory_copy.can_postpone_expiration or receiver.can_postpone_expiration
+        if not can_postpone_expiration:
+            raise errors.ForbiddenOperation
+
+        for rtip in rtips:
+            db_postpone_expiration_date(rtip)
+
+    elif operation == 'delete':
+        can_delete_submission =  GLSettings.memory_copy.can_delete_submission or receiver.can_delete_submission
+        if not can_delete_submission:
+            raise errors.ForbiddenOperation
+
+        for rtip in rtips:
+            db_delete_rtip(store, rtip)
+
+    log.debug("Multiple %s of %d Tips completed" % (operation, len(rtips_ids)))
 
 
 class ReceiverInstance(BaseHandler):
     """
-    This class permit to the receiver to modify some of their fields:
-        Receiver.description
-        Receiver.password
-
-    and permit the overall view of all the Tips related to the receiver
-    GET and PUT /receiver/preferences
+    This handler allow receivers to modify some of their fields:
+        - language
+        - timezone
+        - password
+        - notification settings
+        - pgp key
     """
 
-    @transport_security_check('receiver')
-    @authenticated('receiver')
+    @BaseHandler.transport_security_check('receiver')
+    @BaseHandler.authenticated('receiver')
     @inlineCallbacks
     def get(self):
         """
         Parameters: None
-        Response: receiverReceiverDesc
-        Errors: TipIdNotFound, InvalidInputFormat, InvalidTipAuthToken
+        Response: ReceiverReceiverDesc
+        Errors: ReceiverIdNotFound, InvalidInputFormat, InvalidAuthentication
         """
-
         receiver_status = yield get_receiver_settings(self.current_user.user_id,
-            self.request.language)
+                                                      self.request.language)
 
-        self.set_status(200)
-        self.finish(receiver_status)
+        self.write(receiver_status)
 
 
-    @transport_security_check('receiver')
-    @authenticated('receiver')
+    @BaseHandler.transport_security_check('receiver')
+    @BaseHandler.authenticated('receiver')
     @inlineCallbacks
     def put(self):
         """
         Parameters: None
-        Request: receiverReceiverDesc
-        Response: receiverReceiverDesc
-        Errors: ReceiverIdNotFound, InvalidInputFormat, InvalidTipAuthToken, TipIdNotFound
+        Request: ReceiverReceiverDesc
+        Response: ReceiverReceiverDesc
+        Errors: ReceiverIdNotFound, InvalidInputFormat, InvalidAuthentication
         """
-        request = self.validate_message(self.request.body, requests.receiverReceiverDesc)
+        request = self.validate_message(self.request.body, requests.ReceiverReceiverDesc)
 
         receiver_status = yield update_receiver_settings(self.current_user.user_id,
-            request, self.request.language)
+                                                         request,
+                                                         self.request.language)
 
-        self.set_status(200)
-        self.finish(receiver_status)
+        GLApiCache.invalidate('receivers')
 
-
-@transact_ro
-def get_receiver_tip_list(store, receiver_id, language=GLSetting.memory_copy.default_language):
-
-    rtiplist = store.find(ReceiverTip, ReceiverTip.receiver_id == receiver_id)
-    rtiplist.order_by(Desc(ReceiverTip.creation_date))
-
-    node = store.find(Node).one()
-
-    rtip_summary_list = []
-
-    for rtip in rtiplist:
-
-        postpone_superpower = (node.postpone_superpower or
-                               rtip.internaltip.context.postpone_superpower or
-                               rtip.receiver.postpone_superpower)
-
-        can_delete_submission = (node.can_delete_submission or
-                                 rtip.internaltip.context.can_delete_submission or
-                                 rtip.receiver.can_delete_submission)
-
-        rfiles_n = store.find(ReceiverFile,
-            (ReceiverFile.internaltip_id == rtip.internaltip.id,
-             ReceiverFile.receiver_id == receiver_id)).count()
-
-        your_messages = store.find(Message,
-                                   Message.receivertip_id == rtip.id,
-                                   Message.type == u'receiver').count()
-
-        unread_messages = store.find(Message,
-                                     Message.receivertip_id == rtip.id,
-                                     Message.type == u'whistleblower',
-                                     Message.visualized == False).count()
-
-        read_messages = store.find(Message,
-                                   Message.receivertip_id == rtip.id,
-                                   Message.type == u'whistleblower',
-                                   Message.visualized == True).count()
-
-        single_tip_sum = dict({
-            'id' : rtip.id,
-            'creation_date' : datetime_to_ISO8601(rtip.creation_date),
-            'last_access' : datetime_to_ISO8601(rtip.last_access),
-            'expiration_date' : datetime_to_ISO8601(rtip.internaltip.expiration_date),
-            'access_counter': rtip.access_counter,
-            'files_number': rfiles_n,
-            'comments_number': rtip.internaltip.comments.count(),
-            'unread_messages' : unread_messages,
-            'read_messages' : read_messages,
-            'your_messages' : your_messages,
-            'postpone_superpower': postpone_superpower,
-            'can_delete_submission': can_delete_submission,
-        })
-
-        mo = Rosetta(rtip.internaltip.context.localized_strings)
-        mo.acquire_storm_object(rtip.internaltip.context)
-        single_tip_sum["context_name"] = mo.dump_localized_attr('name', language)
-
-        preview_data = []
-
-        for s in rtip.internaltip.wb_steps:
-            for f in s['children']:
-                if f['preview']:
-                    preview_data.append(f)
-
-        single_tip_sum.update({ 'preview' : preview_data })
-        rtip_summary_list.append(single_tip_sum)
-
-    return rtip_summary_list
+        self.write(receiver_status)
 
 
 class TipsCollection(BaseHandler):
     """
     This interface return the summary list of the Tips available for the authenticated Receiver
-    GET /tips/<receiver_token_auth/tip
+    GET /tips
     """
-
-    @transport_security_check('receiver')
-    @authenticated('receiver')
+    @BaseHandler.transport_security_check('receiver')
+    @BaseHandler.authenticated('receiver')
     @inlineCallbacks
     def get(self):
         """
-        Parameters: tip_auth_token
         Response: receiverTipList
-        Errors: InvalidTipAuthToken
+        Errors: InvalidAuthentication
         """
+        answer = yield get_receivertip_list(self.current_user.user_id,
+                                            self.request.language)
 
-        answer = yield get_receiver_tip_list(self.current_user.user_id, self.request.language)
+        self.write(answer)
 
-        self.set_status(200)
-        self.finish(answer)
+
+class TipsOperations(BaseHandler):
+    """
+    This interface receive some operation (postpone or delete) and a list of
+    tips to apply.
+    """
+    @BaseHandler.transport_security_check('receiver')
+    @BaseHandler.authenticated('receiver')
+    @inlineCallbacks
+    def put(self):
+        """
+        Parameters: ReceiverOperationDesc
+        Res
+        Errors: InvalidAuthentication, TipIdNotFound, ForbiddenOperation
+        """
+        request = self.validate_message(self.request.body, requests.ReceiverOperationDesc)
+
+        if request['operation'] not in ['postpone', 'delete']:
+            raise errors.ForbiddenOperation
+
+        yield perform_tips_operation(self.current_user.user_id, request['operation'], request['rtips'])

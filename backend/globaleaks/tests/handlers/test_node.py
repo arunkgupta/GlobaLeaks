@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
-from twisted.internet.defer import inlineCallbacks
-
 import json
 
+from twisted.internet.defer import inlineCallbacks
 from globaleaks.rest import requests
 from globaleaks.tests import helpers
 from globaleaks.handlers import node, admin
-from globaleaks.settings import GLSetting
 
-class TestInfoCollection(helpers.TestHandlerWithPopulatedDB):
-    _handler = node.InfoCollection
+
+class TestNodeInstance(helpers.TestHandlerWithPopulatedDB):
+    _handler = node.NodeInstance
 
     @inlineCallbacks
     def test_get(self):
@@ -18,37 +17,68 @@ class TestInfoCollection(helpers.TestHandlerWithPopulatedDB):
 
         self.assertTrue(isinstance(self.responses, list))
         self.assertEqual(len(self.responses), 1)
-        self._handler.validate_message(json.dumps(self.responses[0]), requests.anonNodeDesc)
+        self._handler.validate_message(json.dumps(self.responses[0]), requests.NodeDesc)
 
 
 class TestAhmiaDescriptionHandler(helpers.TestHandlerWithPopulatedDB):
     _handler = node.AhmiaDescriptionHandler
 
     @inlineCallbacks
-    def test_001_get_ahmia_disabled(self):
+    def test_get_ahmia_disabled(self):
         handler = self.request({}, role='admin')
 
         nodedict = helpers.MockDict().dummyNode
         nodedict['ahmia'] = False
 
-        yield admin.update_node(nodedict)
+        yield admin.node.update_node(nodedict, True, 'en')
 
         yield handler.get()
         self.assertTrue(isinstance(self.responses, list))
         self.assertEqual(len(self.responses), 0)
 
     @inlineCallbacks
-    def test_002_get_ahmia_enabled(self):
+    def test_get_ahmia_enabled(self):
         handler = self.request({}, role='admin')
 
         nodedict = helpers.MockDict().dummyNode
         nodedict['ahmia'] = True
-        yield admin.update_node(nodedict)
+        yield admin.node.update_node(nodedict, True, 'en')
 
         yield handler.get()
         self.assertTrue(isinstance(self.responses, list))
         self.assertEqual(len(self.responses), 1)
-        self._handler.validate_message(json.dumps(self.responses[0]), requests.ahmiaDesc)
+        self._handler.validate_message(json.dumps(self.responses[0]), requests.AhmiaDesc)
+
+
+class TestRobotstxtHandlerHandler(helpers.TestHandlerWithPopulatedDB):
+    _handler = node.RobotstxtHandler
+
+    @inlineCallbacks
+    def test_get_with_indexing_disabled(self):
+        handler = self.request({}, role='admin')
+
+        nodedict = helpers.MockDict().dummyNode
+        nodedict['allow_indexing'] = False
+
+        yield admin.node.update_node(nodedict, True, 'en')
+
+        yield handler.get()
+        self.assertTrue(isinstance(self.responses, list))
+        self.assertEqual(len(self.responses), 1)
+        self.assertEqual(self.responses[0], "User-agent: *\nDisallow: /")
+
+    @inlineCallbacks
+    def test_get_with_indexing_enabled(self):
+        handler = self.request({}, role='admin')
+
+        nodedict = helpers.MockDict().dummyNode
+        nodedict['allow_indexing'] = True
+        yield admin.node.update_node(nodedict, True, 'en')
+
+        yield handler.get()
+        self.assertTrue(isinstance(self.responses, list))
+        self.assertEqual(len(self.responses), 1)
+        self.assertEqual(self.responses[0], "User-agent: *\nAllow: /")
 
 
 class TestContextsCollection(helpers.TestHandlerWithPopulatedDB):
@@ -61,7 +91,7 @@ class TestContextsCollection(helpers.TestHandlerWithPopulatedDB):
 
         self.assertTrue(isinstance(self.responses, list))
         self.assertEqual(len(self.responses), 1)
-        self._handler.validate_message(json.dumps(self.responses[0]), requests.nodeContextCollection)
+        self._handler.validate_message(json.dumps(self.responses[0]), requests.ContextCollectionDesc)
 
 
 class TestReceiversCollection(helpers.TestHandlerWithPopulatedDB):
@@ -74,4 +104,4 @@ class TestReceiversCollection(helpers.TestHandlerWithPopulatedDB):
 
         self.assertTrue(isinstance(self.responses, list))
         self.assertEqual(len(self.responses), 1)
-        self._handler.validate_message(json.dumps(self.responses[0]), requests.nodeReceiverCollection)
+        self._handler.validate_message(json.dumps(self.responses[0]), requests.ReceiverCollectionDesc)

@@ -1,89 +1,143 @@
 # -*- coding: UTF-8
 #
-#   wbtip
+# wbtip
 #   *****
 #
 #   Contains all the logic for handling tip related operations, managed by
 #   the whistleblower, handled and executed within /wbtip/* URI PATH interaction.
-
-from storm.exceptions import DatabaseError
 from twisted.internet.defer import inlineCallbacks
 
+from globaleaks.orm import transact, transact_ro
 from globaleaks.handlers.base import BaseHandler
-from globaleaks.handlers.authentication import transport_security_check, authenticated
-from globaleaks.rest import requests
-from globaleaks.utils.utility import log, datetime_now, datetime_to_ISO8601, datetime_to_pretty_str
-from globaleaks.utils.structures import Rosetta
-from globaleaks.settings import transact, transact_ro, GLSetting
+from globaleaks.handlers.rtip import db_get_itip_receiver_list, \
+    serialize_comment, serialize_message
+from globaleaks.handlers.submission import serialize_usertip, \
+    db_save_questionnaire_answers, db_get_archived_questionnaire_schema
 from globaleaks.models import WhistleblowerTip, Comment, Message, ReceiverTip
-from globaleaks.rest import errors
-
-
-def wb_serialize_tip(internaltip, language=GLSetting.memory_copy.default_language):
-    ret_dict = {
-        'context_id': internaltip.context.id,
-        'creation_date' : datetime_to_ISO8601(internaltip.creation_date),
-        'last_activity' : datetime_to_ISO8601(internaltip.creation_date),
-        'expiration_date' : datetime_to_ISO8601(internaltip.expiration_date),
-        'download_limit' : internaltip.download_limit,
-        'access_limit' : internaltip.access_limit,
-        'mark' : internaltip.mark,
-        'wb_steps' : internaltip.wb_steps,
-        'enable_private_messages' : internaltip.context.enable_private_messages,
-        'show_receivers': internaltip.context.show_receivers, 
-    }
-
-    # context_name and context_description are localized fields
-    mo = Rosetta(internaltip.context.localized_strings)
-    mo.acquire_storm_object(internaltip.context)
-    for attr in ['name', 'description' ]:
-        key = "context_%s" % attr
-        ret_dict[key] = mo.dump_localized_attr(attr, language)
-
-    return ret_dict
+from globaleaks.rest import errors, requests
+from globaleaks.utils.utility import log, datetime_now, datetime_to_ISO8601
 
 
 def wb_serialize_file(internalfile):
-    wb_file_desc = {
+    return {
         'id': internalfile.id,
-        'name' : internalfile.name,
-        'content_type' : internalfile.content_type,
-        'creation_date' : datetime_to_ISO8601(internalfile.creation_date),
-        'size': internalfile.size,
+        'name': internalfile.name,
+        'content_type': internalfile.content_type,
+        'creation_date': datetime_to_ISO8601(internalfile.creation_date),
+        'size': internalfile.size
     }
-    return wb_file_desc
 
 
-@transact_ro
-def get_files_wb(store, wb_tip_id):
-    wbtip = store.find(WhistleblowerTip, WhistleblowerTip.id == unicode(wb_tip_id)).one()
-
-    file_list = []
-    for internalfile in wbtip.internaltip.internalfiles:
-        file_list.append(wb_serialize_file(internalfile))
-
-    file_list.reverse()
-
-    return file_list
-
-
-@transact
-def get_internaltip_wb(store, tip_id, language=GLSetting.memory_copy.default_language):
-    wbtip = store.find(WhistleblowerTip, WhistleblowerTip.id == unicode(tip_id)).one()
+def db_access_wbtip(store, wbtip_id):
+    wbtip = store.find(WhistleblowerTip, WhistleblowerTip.id == wbtip_id).one()
 
     if not wbtip:
         raise errors.TipReceiptNotFound
 
-    # there is not a limit in the WB access counter, but is kept track
+    return wbtip
+
+
+def db_get_file_list(store, wbtip_id):
+    wbtip = db_access_wbtip(store, wbtip_id)
+
+    return [wb_serialize_file(internalfile) for internalfile in wbtip.internaltip.internalfiles]
+
+
+def db_get_wbtip(store, wbtip_id, language):
+    wbtip = db_access_wbtip(store, wbtip_id)
+
     wbtip.access_counter += 1
 
-    tip_desc = wb_serialize_tip(wbtip.internaltip, language)
-
-    # two elements from WhistleblowerTip
-    tip_desc['access_counter'] = wbtip.access_counter
-    tip_desc['id'] = wbtip.id
+    tip_desc = serialize_wbtip(store, wbtip, language)
 
     return tip_desc
+
+
+@transact
+def get_wbtip(store, wbtip_id, language):
+    return db_get_wbtip(store, wbtip_id, language)
+
+
+@transact_ro
+def get_receiver_list(store, wbtip_id, language):
+    wbtip = db_access_wbtip(store, wbtip_id)
+
+    return db_get_itip_receiver_list(store, wbtip.internaltip, language)
+
+
+@transact_ro
+def get_comment_list(store, wbtip_id):
+    wbtip = db_access_wbtip(store, wbtip_id)
+
+    return [serialize_comment(comment) for comment in wbtip.internaltip.comments]
+
+
+def serialize_wbtip(store, wbtip, language):
+    ret = serialize_usertip(store, wbtip, language)
+
+    # filter submission progressive
+    # to prevent a fake whistleblower to assess every day how many
+    # submissions are received by the platform.
+    del ret['progressive']
+
+    ret['id'] = wbtip.id
+    ret['files'] = db_get_file_list(store, wbtip.id)
+
+    return ret
+
+@transact
+def create_comment(store, wbtip_id, request):
+    wbtip = db_access_wbtip(store, wbtip_id)
+    wbtip.internaltip.update_date = datetime_now()
+
+    comment = Comment()
+    comment.content = request['content']
+    comment.internaltip_id = wbtip.internaltip_id
+    comment.author = u'whistleblower'
+    comment.type = u'whistleblower'
+
+    wbtip.internaltip.comments.add(comment)
+
+    return serialize_comment(comment)
+
+
+@transact_ro
+def get_message_list(store, wbtip_id, receiver_id):
+    """
+    Get the messages content and mark all the unread
+    messages as "read"
+    """
+    wbtip = db_access_wbtip(store, wbtip_id)
+
+    rtip = store.find(ReceiverTip, ReceiverTip.internaltip_id == wbtip.internaltip_id,
+                      ReceiverTip.receiver_id == receiver_id).one()
+
+    if not rtip:
+        raise errors.TipIdNotFound
+
+    return [serialize_message(message) for message in rtip.messages]
+
+
+@transact
+def create_message(store, wbtip_id, receiver_id, request):
+    wbtip = db_access_wbtip(store, wbtip_id)
+    wbtip.internaltip.update_date = datetime_now()
+
+    rtip = store.find(ReceiverTip, ReceiverTip.internaltip_id == wbtip.internaltip_id,
+                      ReceiverTip.receiver_id == receiver_id).one()
+
+    if not rtip:
+        raise errors.TipIdNotFound
+
+    msg = Message()
+    msg.content = request['content']
+    msg.receivertip_id = rtip.id
+    msg.author = u'whistleblower'
+    msg.type = u'whistleblower'
+
+    store.add(msg)
+
+    return serialize_message(msg)
 
 
 class WBTipInstance(BaseHandler):
@@ -95,72 +149,21 @@ class WBTipInstance(BaseHandler):
     promote, and perform other operations in this protected environment.
     """
 
-    @transport_security_check('wb')
-    @authenticated('wb')
+    @BaseHandler.transport_security_check('whistleblower')
+    @BaseHandler.authenticated('whistleblower')
     @inlineCallbacks
     def get(self):
         """
         Parameters: None
         Response: actorsTipDesc
-        Errors: InvalidTipAuthToken
 
         Check the user id (in the whistleblower case, is authenticated and
         contain the internaltip)
         """
 
-        answer = yield get_internaltip_wb(self.current_user.user_id, self.request.language)
-        answer['files'] = yield get_files_wb(self.current_user.user_id)
+        answer = yield get_wbtip(self.current_user.user_id, self.request.language)
 
-        self.set_status(200)
-        self.finish(answer)
-
-
-def wb_serialize_comment(comment):
-    comment_desc = {
-        'comment_id' : comment.id,
-        'type' : comment.type,
-        'content' : comment.content,
-        'system_content' : comment.system_content if comment.system_content else {},
-        'author' : comment.author,
-        'creation_date' : datetime_to_ISO8601(comment.creation_date)
-    }
-
-    return comment_desc
-
-
-@transact_ro
-def get_comment_list_wb(store, wb_tip_id):
-    wb_tip = store.find(WhistleblowerTip,
-                        WhistleblowerTip.id == unicode(wb_tip_id)).one()
-
-    if not wb_tip:
-        raise errors.TipReceiptNotFound
-
-    comment_list = []
-    for comment in wb_tip.internaltip.comments:
-        comment_list.append(wb_serialize_comment(comment))
-
-    return comment_list
-
-
-@transact
-def create_comment_wb(store, wb_tip_id, request):
-    wbtip = store.find(WhistleblowerTip,
-                       WhistleblowerTip.id == unicode(wb_tip_id)).one()
-
-    if not wbtip:
-        raise errors.TipReceiptNotFound
-
-    comment = Comment()
-    comment.content = request['content']
-    comment.internaltip_id = wbtip.internaltip.id
-    comment.author = u'whistleblower' # The printed line
-    comment.type = Comment._types[1] # WB
-    comment.mark = Comment._marker[0] # Not notified
-
-    wbtip.internaltip.comments.add(comment)
-
-    return wb_serialize_comment(comment)
+        self.write(answer)
 
 
 class WBTipCommentCollection(BaseHandler):
@@ -170,125 +173,33 @@ class WBTipCommentCollection(BaseHandler):
     as a stone written consideration about Tip reliability, therefore no editing and rethinking is
     permitted.
     """
-
-    @transport_security_check('wb')
-    @authenticated('wb')
+    @BaseHandler.transport_security_check('whistleblower')
+    @BaseHandler.authenticated('whistleblower')
     @inlineCallbacks
-    def get(self, *uriargs):
+    def get(self):
         """
         Parameters: None
         Response: actorsCommentList
-        Errors: InvalidTipAuthToken
         """
-        wb_comment_list = yield get_comment_list_wb(self.current_user.user_id)
+        wb_comment_list = yield get_comment_list(self.current_user.user_id)
 
-        self.set_status(200)
-        self.finish(wb_comment_list)
+        self.write(wb_comment_list)
 
-    @transport_security_check('wb')
-    @authenticated('wb')
+    @BaseHandler.transport_security_check('whistleblower')
+    @BaseHandler.authenticated('whistleblower')
     @inlineCallbacks
-    def post(self, *uriargs):
+    def post(self):
         """
-        Request: actorsCommentDesc
-        Response: actorsCommentDesc
-        Errors: InvalidTipAuthToken, InvalidInputFormat, TipIdNotFound, TipReceiptNotFound
+        Request: CommentDesc
+        Response: CommentDesc
+        Errors: InvalidInputFormat, TipIdNotFound, TipReceiptNotFound
         """
 
-        request = self.validate_message(self.request.body, requests.actorsCommentDesc)
-        answer = yield create_comment_wb(self.current_user.user_id, request)
+        request = self.validate_message(self.request.body, requests.CommentDesc)
+        answer = yield create_comment(self.current_user.user_id, request)
 
-        self.set_status(201) # Created
-        self.finish(answer)
-
-
-@transact_ro
-def get_receiver_list_wb(store, wb_tip_id, language=GLSetting.memory_copy.default_language):
-    """
-    @return:
-        This function contain the serialization of the receiver, this function is
-        used only by /wbtip/receivers API
-
-        The returned struct contain information on read/unread messages
-    """
-
-    wb_tip = store.find(WhistleblowerTip,
-                        WhistleblowerTip.id == unicode(wb_tip_id)).one()
-
-    if not wb_tip:
-        raise errors.TipReceiptNotFound
-
-    # This part of code is used only in the short time between the first
-    # WB access and the delivery schedule. In this moment
-    # wb_tip.internaltips.receivertips is EMPTY, therefore we force
-    # the Receivers values below
-    if not wb_tip.internaltip.receivertips.count():
-        receiver_list = []
-
-        log.debug("Early access from the WB to the Tip (creation_date: %s UTC),"\
-                  " Receiver not yet present: fallback on receiver list" %
-                  datetime_to_pretty_str(wb_tip.creation_date))
-
-        for receiver in wb_tip.internaltip.receivers:
-
-            # This is the reduced version of Receiver serialization
-            receiver_desc = {
-                "name": receiver.name,
-                "id": receiver.id,
-                "gpg_key_status": receiver.gpg_key_status,
-                "access_counter" : 0,
-                "unread_messages" : 0,
-                "read_messages" : 0,
-                "your_messages" : 0,
-                "creation_date" : datetime_to_ISO8601(datetime_now()),
-                # XXX ReceiverTip last activity ?
-            }
-
-            mo = Rosetta(receiver.localized_strings)
-            mo.acquire_storm_object(receiver)
-            receiver_desc["description"] = mo.dump_localized_attr("description", language)
-
-            receiver_list.append(receiver_desc)
-
-        return receiver_list
-    else:
-        receiver_list = []
-        for rtip in wb_tip.internaltip.receivertips:
-
-
-            your_messages = store.find(Message,
-                                       Message.receivertip_id == rtip.id,
-                                       Message.type == u'whistleblower').count()
-
-            unread_messages = store.find(Message,
-                                         Message.receivertip_id == rtip.id,
-                                         Message.type == u'receiver',
-                                         Message.visualized == False).count()
-
-            read_messages = store.find(Message,
-                                       Message.receivertip_id == rtip.id,
-                                       Message.type == u'receiver',
-                                       Message.visualized == True).count()
-
-            # if you change something here, check also 20 lines before!
-            receiver_desc = {
-                "name": rtip.receiver.name,
-                "id": rtip.receiver.id,
-                "access_counter" : rtip.access_counter,
-                "unread_messages" : unread_messages,
-                "read_messages" : read_messages,
-                "your_messages" : your_messages,
-                "creation_date" : datetime_to_ISO8601(datetime_now()),
-                # XXX ReceiverTip last activity ?
-            }
-
-            mo = Rosetta(rtip.receiver.localized_strings)
-            mo.acquire_storm_object(rtip.receiver)
-            receiver_desc["description"] = mo.dump_localized_attr("description", language)
-
-            receiver_list.append(receiver_desc)
-
-        return receiver_list
+        self.set_status(201)  # Created
+        self.write(answer)
 
 
 class WBTipReceiversCollection(BaseHandler):
@@ -297,98 +208,17 @@ class WBTipReceiversCollection(BaseHandler):
     GET /tip/receivers
     """
 
-    @transport_security_check('wb')
-    @authenticated('wb')
+    @BaseHandler.transport_security_check('whistleblower')
+    @BaseHandler.authenticated('whistleblower')
     @inlineCallbacks
     def get(self):
         """
         Parameters: None
         Response: actorsReceiverList
-        Errors: InvalidTipAuthToken
         """
-        answer = yield get_receiver_list_wb(self.current_user.user_id, self.request.language)
+        answer = yield get_receiver_list(self.current_user.user_id, self.request.language)
 
-        self.set_status(200)
-        self.finish(answer)
-
-
-def wb_serialize_message(msg):
-    return {
-        'id' : msg.id,
-        'creation_date' : datetime_to_ISO8601(msg.creation_date),
-        'content' : msg.content,
-        'visualized' : msg.visualized,
-        'type' : msg.type,
-        'author' : msg.author,
-        'mark' : msg.mark
-    }
-
-@transact
-def get_messages_content(store, wb_tip_id, receiver_id):
-    """
-    Get the messages content and mark all the unread
-    messages as "read"
-    """
-    wb_tip = store.find(WhistleblowerTip,
-                        WhistleblowerTip.id == unicode(wb_tip_id)).one()
-
-    if not wb_tip:
-        raise errors.TipReceiptNotFound
-
-    rtip = store.find(ReceiverTip, ReceiverTip.internaltip_id == wb_tip.internaltip.id,
-                      ReceiverTip.receiver_id == unicode(receiver_id)).one()
-
-    if not rtip:
-        raise errors.TipMessagesNotFound
-
-    messages = store.find(Message, Message.receivertip_id == rtip.id)
-
-    messages_list = []
-    for msg in messages:
-        messages_list.append(wb_serialize_message(msg))
-
-        if not msg.visualized and msg.type == u'receiver':
-            log.debug("Marking as readed message [%s] from %s" % (msg.content, msg.author))
-            msg.visualized = True
-
-    store.commit()
-    return messages_list
-
-
-@transact
-def create_message_wb(store, wb_tip_id, receiver_id, request):
-
-    wb_tip = store.find(WhistleblowerTip,
-                        WhistleblowerTip.id == unicode(wb_tip_id)).one()
-
-    if not wb_tip:
-        log.err("Invalid wb_tip supply: %s" % wb_tip)
-        raise errors.TipReceiptNotFound
-
-    rtip = store.find(ReceiverTip, ReceiverTip.internaltip_id == wb_tip.internaltip.id,
-                                   ReceiverTip.receiver_id == unicode(receiver_id)).one()
-
-    if not rtip:
-        log.err("No ReceiverTip found: receiver_id %s itip %s" %
-                (receiver_id, wb_tip.internaltip.id))
-        raise errors.TipIdNotFound
-
-    msg = Message()
-    msg.content = request['content']
-    msg.receivertip_id = rtip.id
-    msg.author = u'Whistleblower'
-    msg.visualized = False
-
-    msg.type = u'whistleblower'
-    msg.mark = u'not notified'
-
-    try:
-        store.add(msg)
-    except DatabaseError as dberror:
-        log.err("Unable to add WB message from %s: %s" % (rtip.receiver.name, dberror))
-        raise dberror
-
-    return wb_serialize_message(msg)
+        self.write(answer)
 
 
 class WBTipMessageCollection(BaseHandler):
@@ -399,24 +229,59 @@ class WBTipMessageCollection(BaseHandler):
     Supports the creation of a new message for the requested receiver
     """
 
-    @transport_security_check('wb')
-    @authenticated('wb')
+    @BaseHandler.transport_security_check('whistleblower')
+    @BaseHandler.authenticated('whistleblower')
     @inlineCallbacks
     def get(self, receiver_id):
+        messages = yield get_message_list(self.current_user.user_id, receiver_id)
 
-        messages = yield get_messages_content(self.current_user.user_id, receiver_id)
+        self.write(messages)
 
-        self.set_status(200)
-        self.finish(messages)
-
-    @transport_security_check('wb')
-    @authenticated('wb')
+    @BaseHandler.transport_security_check('whistleblower')
+    @BaseHandler.authenticated('whistleblower')
     @inlineCallbacks
     def post(self, receiver_id):
+        request = self.validate_message(self.request.body, requests.CommentDesc)
 
-        request = self.validate_message(self.request.body, requests.actorsCommentDesc)
+        message = yield create_message(self.current_user.user_id, receiver_id, request)
 
-        message = yield create_message_wb(self.current_user.user_id, receiver_id, request)
+        self.set_status(201)  # Created
+        self.write(message)
 
-        self.set_status(201) # Created
-        self.finish(message)
+
+class WBTipIdentityHandler(BaseHandler):
+    """
+    This is the interface that securely allows the whistleblower to provide his identity
+    """
+    @BaseHandler.transport_security_check('whistleblower')
+    @BaseHandler.authenticated('whistleblower')
+    @inlineCallbacks
+    def post(self, tip_id):
+        """
+        Some special operation over the Tip are handled here
+        """
+        request = self.validate_message(self.request.body, requests.WhisleblowerIdentityAnswers)
+
+        @transact
+        def update_identity_information(store, identity_field_id, identity_field_answers, language):
+            wbtip = db_access_wbtip(store, tip_id)
+            internaltip = wbtip.internaltip
+            identity_provided = internaltip.identity_provided
+
+            if not identity_provided:
+                questionnaire = db_get_archived_questionnaire_schema(store, internaltip.questionnaire_hash, language)
+                for step in questionnaire:
+                    if identity_provided: break
+                    for field in step['children']:
+                        if identity_provided: break
+                        if field['id'] == identity_field_id and field['key'] == 'whistleblower_identity':
+                            db_save_questionnaire_answers(store, internaltip.id,
+                                                          {identity_field_id: [identity_field_answers]})
+                            now = datetime_now()
+                            internaltip.update_date = now
+                            internaltip.identity_provided = True
+                            internaltip.identity_provided_date = now
+
+        yield update_identity_information(request['identity_field_id'], request['identity_field_answers'], self.request.language)
+
+        self.set_status(202)  # Updated

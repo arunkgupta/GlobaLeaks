@@ -3,16 +3,18 @@
 #   *******
 #
 # GlobaLeaks Utility Functions
+from __future__ import print_function
 
 import cgi
 import codecs
+import ctypes
 import inspect
 import logging
 import os
 import sys
 import time
 import traceback
-from uuid import UUID
+import uuid
 from datetime import datetime, timedelta
 
 from twisted.internet import reactor
@@ -22,47 +24,53 @@ from twisted.python import logfile as twlogfile
 from twisted.python import util
 from twisted.python.failure import Failure
 
-from globaleaks.settings import GLSetting
+from globaleaks import LANGUAGES_SUPPORTED_CODES
+from globaleaks.settings import GLSettings
+
 
 def uuid4():
     """
-    This function returns a secure random uuid4 as
-    defined by http://www.ietf.org/rfc/rfc4122.txt
+    This function returns a uuid4.
 
-    r'([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})
-    this is the regexp that has to be matched, and if a special
-    debug option is enabled here, the UUIDv4 is not randomic
+    The function is not intended to be used for security reasons.
     """
-    if len(GLSetting.debug_option_UUID_human) > 1:
+    return unicode(uuid.uuid4())
 
-        GLSetting.debug_UUID_human_counter += 1
-        str_padding = 8 - len(GLSetting.debug_option_UUID_human)
-        int_padding = 12 - len("%d" % GLSetting.debug_UUID_human_counter)
 
-        Huuidv4 = "%s%s-0000-0000-0000-%s%d" % (
-            GLSetting.debug_option_UUID_human,
-            str_padding * "0",
-            int_padding * "0",
-            GLSetting.debug_UUID_human_counter
-        )
-        return unicode(Huuidv4)
-    else:
-        return unicode(UUID(bytes=os.urandom(16), version=4))
+def sum_dicts(*dicts):
+    ret = {}
+
+    for d in dicts:
+        for k, v in d.items():
+            ret[k] = v
+
+    return dict(ret)
+
+
+def every_language(default_text):
+    ret = {}
+
+    for code in LANGUAGES_SUPPORTED_CODES:
+        ret.update({code : default_text})
+
+    return ret
 
 
 def randint(start, end=None):
-    if not end:
+    if end is None:
         end = start
         start = 0
     w = end - start + 1
     return start + int(''.join("%x" % ord(x) for x in os.urandom(w)), 16) % w
 
+
 def randbits(bits):
     return os.urandom(int(bits/8))
 
+
 def choice(population):
-    size = len(population)
-    return population[randint(size-1)]
+    return population[randint(len(population) - 1)]
+
 
 def shuffle(x):
     for i in reversed(xrange(1, len(x))):
@@ -70,17 +78,17 @@ def shuffle(x):
         x[i], x[j] = x[j], x[i]
     return x
 
+
 def deferred_sleep(timeout):
-    """
-    @param timeout: this sleep is called to slow down bruteforce attacks
-    @return:
-    """
+    d = Deferred()
+
     def callbackDeferred():
         d.callback(True)
 
-    d = Deferred()
     reactor.callLater(timeout, callbackDeferred)
+
     return d
+
 
 def log_encode_html(s):
     """
@@ -91,7 +99,9 @@ def log_encode_html(s):
     s = s.replace("'", "&#39;")
     s = s.replace("/", "&#47;")
     s = s.replace("\\", "&#92;")
+
     return s
+
 
 def log_remove_escapes(s):
     """
@@ -101,8 +111,7 @@ def log_remove_escapes(s):
         return codecs.encode(s, 'unicode_escape')
     else:
         try:
-            s = str(s)
-            unicodelogmsg = s.decode('utf-8')
+            unicodelogmsg = str(s).decode('utf-8')
         except UnicodeDecodeError:
             return codecs.encode(s, 'string_escape')
         except Exception as e:
@@ -110,14 +119,13 @@ def log_remove_escapes(s):
         else:
             return codecs.encode(unicodelogmsg, 'unicode_escape')
 
-class GLLogObserver(twlog.FileLogObserver):
 
+class GLLogObserver(twlog.FileLogObserver):
     suppressed = 0
     limit_suppressed = 1
     last_exception_msg = ""
 
     def emit(self, eventDict):
-
         if 'failure' in eventDict:
             vf = eventDict['failure']
             e_t, e_v, e_tb = vf.type, vf.value, vf.getTracebackObject()
@@ -132,11 +140,6 @@ class GLLogObserver(twlog.FileLogObserver):
         msgStr = twlog._safeFormat("[%(system)s] %(text)s\n", fmtDict)
 
         if GLLogObserver.suppressed == GLLogObserver.limit_suppressed:
-            # This code path flush the status of the broken log, in the case a flood is happen
-            # for few moment or in the case something goes wrong when logging below.
-            log.info("!! has been suppressed %d log lines due to error flood (last error %s)" %
-                     (GLLogObserver.limit_suppressed, GLLogObserver.last_exception_msg) )
-
             GLLogObserver.suppressed = 0
             GLLogObserver.limit_suppressed += 5
             GLLogObserver.last_exception_msg = ""
@@ -172,19 +175,24 @@ class Logger(object):
             traceback.print_exception(exc_type, exc_value, exc_traceback)
 
     def info(self, msg):
-        if GLSetting.loglevel and GLSetting.loglevel <= logging.INFO:
-            print "[-] %s" % self._str(msg)
+        if GLSettings.loglevel and GLSettings.loglevel <= logging.INFO:
+            print("[-] %s" % self._str(msg))
 
     def err(self, msg):
-        if GLSetting.loglevel:
+        if GLSettings.loglevel:
             twlog.err("[!] %s" % self._str(msg))
 
     def debug(self, msg):
-        if GLSetting.loglevel and GLSetting.loglevel <= logging.DEBUG:
-            print "[D] %s" % self._str(msg)
+        if GLSettings.loglevel and GLSettings.loglevel <= logging.DEBUG:
+            print("[D] %s" % self._str(msg))
+
+    def time_debug(self, msg):
+        # read the command in settings.py near 'verbosity_dict'
+        if GLSettings.loglevel and GLSettings.loglevel <= (logging.DEBUG - 1):
+            print("[T] %s" % self._str(msg))
 
     def msg(self, msg):
-        if GLSetting.loglevel:
+        if GLSettings.loglevel:
             twlog.msg("[ ] %s" % self._str(msg))
 
     def start_logging(self):
@@ -192,16 +200,18 @@ class Logger(object):
         If configured enables logserver
         """
         twlog.startLogging(sys.stdout)
-        if GLSetting.logfile:
-            name = os.path.basename(GLSetting.logfile)
-            directory = os.path.dirname(GLSetting.logfile)
+        if GLSettings.logfile:
+            name = os.path.basename(GLSettings.logfile)
+            directory = os.path.dirname(GLSettings.logfile)
 
             logfile = twlogfile.LogFile(name, directory,
-                                        rotateLength=GLSetting.log_file_size,
-                                        maxRotatedFiles=GLSetting.maximum_rotated_log_files)
+                                        rotateLength=GLSettings.log_file_size,
+                                        maxRotatedFiles=GLSettings.num_log_files)
             twlog.addObserver(GLLogObserver(logfile).emit)
 
+
 log = Logger()
+
 
 def query_yes_no(question, default="no"):
     """
@@ -235,7 +245,15 @@ def query_yes_no(question, default="no"):
         else:
             sys.stdout.write("Please respond with 'y' or 'n'\n\n")
 
+
 ## time facilities ##
+
+def time_now():
+    """
+    @return: current timestamp
+    """
+    return time.time()
+
 
 def datetime_null():
     """
@@ -243,17 +261,13 @@ def datetime_null():
     """
     return datetime.utcfromtimestamp(0)
 
+
 def datetime_now():
     """
-    @return: a utc datetime object of now and eventually incremented
-             of a certain amount of seconds if the Node is running with --XXX option
+    @return: a utc datetime object for the current time
     """
-    now = datetime.utcnow()
+    return datetime.utcnow()
 
-    if GLSetting.debug_option_in_the_future:
-        now += timedelta(seconds=GLSetting.debug_option_in_the_future)
-
-    return now
 
 def utc_dynamic_date(start_date, seconds=0, minutes=0, hours=0):
     """
@@ -263,36 +277,20 @@ def utc_dynamic_date(start_date, seconds=0, minutes=0, hours=0):
     """
     return start_date + timedelta(seconds=(seconds + (minutes * 60) + (hours * 3600)))
 
+
+def utc_past_date(seconds=0, minutes=0, hours=0):
+    """
+    @return a date in the past with the specified delta
+    """
+    return utc_dynamic_date(datetime_now()) - timedelta(seconds=(seconds + (minutes * 60) + (hours * 3600)))
+
+
 def utc_future_date(seconds=0, minutes=0, hours=0):
     """
-    @param seconds: get a datetime obj with now+hours
-    @param minutes: get a datetime obj with now+minutes
-    @param hours: get a datetime obj with now+seconds
-    @return: a datetime object
-        Eventually is incremented of a certain amount of seconds
-        if the Node is running with --XXX option
+    @return a date in the future with the specified delta
     """
-    now = datetime.utcnow()
+    return utc_dynamic_date(datetime_now(), seconds, minutes, hours)
 
-    if GLSetting.debug_option_in_the_future:
-        now += timedelta(seconds=GLSetting.debug_option_in_the_future)
-
-    return utc_dynamic_date(now, seconds, minutes, hours)
-
-def get_future_epoch(seconds=0):
-    """
-    @param seconds: optional, the second in
-        the future
-    @return: seconds since the Epoch
-        This future data is eventually incremented of the
-        amount of seconds specified in --XXX option
-    """
-    basic_future = int(time.time()) - time.timezone + seconds
-
-    if GLSetting.debug_option_in_the_future:
-        basic_future += GLSetting.debug_option_in_the_future
-
-    return basic_future
 
 def is_expired(check_date, seconds=0, minutes=0, hours=0, day=0):
     """
@@ -302,33 +300,30 @@ def is_expired(check_date, seconds=0, minutes=0, hours=0, day=0):
     @return:
         if now > check_date + (seconds+minutes+hours)
         True is returned, else False
-
-        Eventually is incremented of a certain amount of seconds
-        if the Node is running with --XXX option
     """
     if not check_date:
         return False
 
     total_hours = (day * 24) + hours
     check = check_date + timedelta(seconds=seconds, minutes=minutes, hours=total_hours)
-    now = datetime_now()
 
-    if GLSetting.debug_option_in_the_future:
-        now += timedelta(seconds=GLSetting.debug_option_in_the_future)
+    return datetime_now() > check
 
-    return now > check
 
 def datetime_to_ISO8601(date):
     """
-    conver a datetime in ISO8601 format and UTC timezone
+    conver a datetime into ISO8601 date
     """
     if date is None:
         date = datetime_null()
 
     return date.isoformat() + "Z" # Z means that the date is in UTC
 
-def ISO8601_to_datetime(isodate):
 
+def ISO8601_to_datetime(isodate):
+    """
+    convert an ISO8601 date into a datetime
+    """
     isodate = isodate[:19] # we srip the eventual Z at the end
 
     try:
@@ -337,6 +332,7 @@ def ISO8601_to_datetime(isodate):
         ret = datetime.strptime(isodate, "%Y-%m-%dT%H:%M:%S.%f")
         ret.replace(microsecond=0)
     return ret
+
 
 def datetime_to_pretty_str(date):
     """
@@ -347,32 +343,40 @@ def datetime_to_pretty_str(date):
 
     return date.strftime("%A %d %B %Y %H:%M (UTC)")
 
-def ISO8601_to_pretty_str(isodate):
-    """
-    convert a ISO8601 in pretty formatted str format
-    """
-    if isodate is None:
-        isodate = datetime_null().isoformat()
- 
-    date = datetime(year=int(isodate[0:4]),
-                    month=int(isodate[5:7]),
-                    day=int(isodate[8:10]),
-                    hour=int(isodate[11:13]),
-                    minute=int(isodate[14:16]),
-                    second=int(isodate[17:19]) )
 
-    return datetime_to_pretty_str(date)
-
-def datetime_to_pretty_str_tz(date):
+def datetime_to_day_str(date):
     """
-    print a datetime in pretty formatted str format
+    print a datetime in DD/MM/YYYY formatted str
     """
     if date is None:
         date = datetime_null()
 
-    return date.strftime("%A %d %B %Y %H:%M")
+    return date.strftime("%d/%m/%Y")
 
-def ISO8601_to_pretty_str_tz(isodate, tz):
+
+def ISO8601_to_day_str(isodate, tz=0):
+    """
+    print a ISO8601 in DD/MM/YYYY formatted str
+    """
+    if isodate is None:
+        isodate = datetime_null().isoformat()
+
+    date = datetime(year=int(isodate[0:4]),
+                    month=int(isodate[5:7]),
+                    day=int(isodate[8:10]),
+                    hour=int(isodate[11:13]),
+                    minute=int(isodate[14:16]),
+                    second=int(isodate[17:19]))
+
+    if tz:
+        tz_i, tz_d = divmod(tz, 1)
+        tz_d, _  = divmod(tz_d * 100, 1)
+        date += timedelta(hours=tz_i, minutes=tz_d)
+
+    return date.strftime("%d/%m/%Y")
+
+
+def ISO8601_to_pretty_str(isodate, tz=0):
     """
     convert a ISO8601 in pretty formatted str format
     """
@@ -386,34 +390,43 @@ def ISO8601_to_pretty_str_tz(isodate, tz):
                     minute=int(isodate[14:16]),
                     second=int(isodate[17:19]) )
 
-    tz_i, tz_d = divmod(tz, 1)
-    tz_d, _  = divmod(tz_d * 100, 1)
+    if tz:
+        tz_i, tz_d = divmod(tz, 1)
+        tz_d, _  = divmod(tz_d * 100, 1)
+        date += timedelta(hours=tz_i, minutes=tz_d)
+        return date.strftime("%A %d %B %Y %H:%M")
 
-    date += timedelta(hours=tz_i, minutes=tz_d)
+    return datetime_to_pretty_str(date)
 
-    return datetime_to_pretty_str_tz(date)
 
-def seconds_convert(value, conversion_factor, minv=0, maxv=0):
-    """
-    @param value:
-    @param conversion_factor:
-    """
-    seconds = value * conversion_factor
+def iso_year_start(iso_year):
+    """Returns the gregorian calendar date of the first day of the given ISO year"""
+    fourth_jan = datetime.strptime('{0}-01-04'.format(iso_year), '%Y-%m-%d')
+    delta = timedelta(fourth_jan.isoweekday() - 1)
+    return fourth_jan - delta
 
-    if (seconds / conversion_factor) != value:
-        raise Exception("Invalid operation triggered")
-    if minv and (seconds < minv * conversion_factor):
-        raise Exception("%d < %d" % (seconds, minv * conversion_factor))
-    if maxv and (seconds > maxv * conversion_factor):
-        raise Exception("%d > %d" % (seconds, maxv * conversion_factor))
 
-    return seconds
+def iso_to_gregorian(iso_year, iso_week, iso_day):
+    """Returns gregorian calendar date for the given ISO year, week and day"""
+    year_start = iso_year_start(iso_year)
+    return year_start + timedelta(days=iso_day - 1, weeks=iso_week - 1)
 
-def acquire_bool(boolvalue):
-    if boolvalue == 'true' or boolvalue == u'true' or boolvalue == True:
-        return True
 
-    return False
+def bytes_to_pretty_str(b):
+    if b is None:
+        b = 0
+
+    if isinstance(b, str):
+        b = int(b)
+
+    if b >= 1000000000:
+        return "%dGB" % int(b / 1000000000)
+
+    if b >= 1000000:
+        return "%dMB" % int(b / 1000000)
+
+    return "%dKB" % int(b / 1000)
+
 
 def caller_name(skip=2):
     """Get a name of a caller in the format module.class.method
@@ -444,26 +457,19 @@ def caller_name(skip=2):
     codename = parentframe.f_code.co_name
     if codename != '<module>':  # top level usually
         name.append( codename ) # function or a method
-    del parentframe
+
     return ".".join(name)
 
-# Dumping utility
 
-def dump_submission_steps(wb_steps):
+def disable_swap():
+    """
+    use mlockall() system call to prevent the procss to swap
+    """
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
 
-    dumptext = u"FIELD_MAIL_DUMP_STILL_NEED_TO_BE_IMPLEMENTED"
+    MCL_CURRENT = 1
+    MCL_FUTURE = 2
 
-    return dumptext
-
-def dump_file_list(filelist, files_n):
-
-    info = "%s%s%s\n" % ("Filename",
-                             " "*(40-len("Filename")),
-                             "Size (Bytes)")
-
-    for i in xrange(files_n):
-        info += "%s%s%i\n" % (filelist[i]['name'],
-                                " "*(40 - len(filelist[i]['name'])),
-                                filelist[i]['size'])
-
-    return info
+    log.debug("Using mlockall() system call to disable process swap")
+    if libc.mlockall(MCL_CURRENT | MCL_FUTURE):
+        log.err("mlockall failure: %s" % os.strerror(ctypes.get_errno()))

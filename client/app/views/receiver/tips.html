@@ -1,135 +1,226 @@
-<div id="ContentBox" class="container">
-  <div class="row">
-    <div id="ConfigSidebarBox" class="col-md-3" data-ng-include="'views/receiver/sidebar.html'" data-ng-controller="ReceiverSidebarCtrl"></div>
-    <!-- Begin main content -->
-    <div class="col-md-9">
-      <div class="row">
-        <div class="col-md-12">
-          <div class="form-horizontal">
-            <span class="form-group col-md-6" data-ng-init="orderProp='creation_date'">
-              <label class="control-label col-md-4">
-                <span data-translate>Order by:</span>
-              </label>
-              <div class="col-md-6">
-              <select data-ng-model="orderProp" class="form-control">
-                <option value="creation_date" data-translate>Creation</option>
-                <option value="expiration_date" data-translate>Expiration</option>
-                <option value="last_access" data-translate>Last Access</option>
-                <option value="access_counter" data-translate>Access Number</option>
-                <option value="files_number" data-translate>Files Number</option>
-                <option value="comments_number" data-translate>Comments Number</option>
-                <option value="context_name" data-translate>Context Name</option>
-              </select>
-              </div>
+<div id="ReceiverToolbar" class="row">
+  <div class="col-md-12">
+    <span class="pull-left">
+      <span data-ng-if="preferences.can_postpone_expiration || preferences.can_delete_submission">
+        <span id="tip-action-select-all"
+            data-ng-if="selected_tips.length !== tips.length"
+            data-ng-click="select_all()"
+            uib-popover="{{'Select all' | translate}}"
+            popover-placement="top"
+            popover-trigger="mouseenter"
+            class="btn btn-default">
+          <i class="glyphicon glyphicon glyphicon-unchecked"></i>
+        </span>
+
+        <span id="tip-action-select-all"
+            data-ng-if="selected_tips.length === tips.length"
+            data-ng-click="deselect_all()"
+            uib-popover="{{'Deselect all' | translate}}"
+            popover-placement="top"
+            popover-trigger="mouseenter"
+            class="btn btn-default">
+          <i class="glyphicon glyphicon-check"></i>
+        </span>
+
+        <span id="tip-action-postpone-selected"
+            data-ng-if="selected_tips.length && preferences.can_postpone_expiration"
+            data-ng-click="tip_postpone_all()"
+            uib-popover="{{'Postpone the expiration date' | translate}}"
+            popover-placement="top"
+            popover-trigger="mouseenter"
+            class="btn btn-default">
+          <i class="glyphicon glyphicon-time"></i>
+        </span>
+
+        <span id="tip-action-delete-selected"
+          data-ng-if="selected_tips.length && preferences.can_delete_submission"
+          data-ng-click="tip_delete_all()"
+          uib-popover="{{'Delete tips' | translate}}"
+          popover-placement="top"
+          popover-trigger="mouseenter"
+          class="btn btn-default">
+          <span class="glyphicon glyphicon-trash"></span>
+        </span>
+      </span>
+
+      <span id="tip-action-reload"
+        data-ng-click="reload()"
+        uib-popover="{{'Refresh page' | translate}}"
+        popover-placement="top"
+        popover-trigger="mouseenter"
+        class="btn btn-default">
+        <span class="glyphicon glyphicon-refresh"></span>
+      </span>
+
+      <span id="RecvSearchFilter" class="form-group pull-right">
+        <input id="search-filter" type="text" class="form-control" data-ng-attr-placeholder="{{'Search' | translate}}" data-ng-model="search">
+      </span>
+    </span>
+  </div>
+</div>
+
+<div id="TipList" class="row">
+  <div class="col-md-12 table-responsive">
+    <table class="table table-striped" id="tipList" data-ng-init="sortKey = 'creation_date'; sortReverse=true;">
+      <thead>
+        <tr>
+          <th></th>
+          <th>
+            <span>
+              <i class="glyphicon glyphicon-barcode"></i>
             </span>
-            <span class="form-group col-md-6" data-ng-init="reverse='true'">
-              <label class="control-label col-md-4">
-                <span data-translate>Order:</span>
-              </label>
-              <div class="col-md-4">
-                <select data-ng-model="reverse" class="form-control">
-                  <option value="true" data-translate>Desc</option>
-                  <option value="false" data-translate>Asc</option>
-                </select>
-              </div>
+          </th>
+          <th data-ng-if="contexts.length > 1">
+            <span data-ng-click="sortKey = 'context'; sortReverse = !sortReverse">
+              <span data-translate>Context</span>
+              <i class="glyphicon glyphicon-inbox"></i>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'context'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
             </span>
-          </div>
-        </div>
-      </div>
-      <div class="table table-responsive">
-        <table class="table table-bordered" id="tipList">
-          <thead>
-            <tr>
-              <th class="col-md-2">
-                <span data-translate>Tip</span>
-              </th>
-              <th class="col-md-4">
-                <span data-translate>Date</span>
-              </th>
-              <th class="col-md-2">
-                <span data-translate>Info</span>
-              </th>
-              <th><span data-translate>Preview</span></th>
-            </tr>
-          </thead>
-          <tbody id="tipListTableBody" data-ng-controller="TipCtrl">
-            <tr data-ng-repeat="tip in tips | orderBy:orderProp:reverse" class="{{tip.parity}}">
-              <td class="col-md-2">
-                <a data-ng-switch="tip.access_counter" href="/#/status/{{tip.id}}">
-                  <span data-ng-switch-when="0" class="btn btn-success col-md-12" style="text-align: left">
-                    <span class="glyphicon glyphicon-tint"></span>&nbsp;
-                    <span data-translate>Open</span>
-                    <span data-translate>(New)</span>
-                  </span>
-                  <span data-ng-switch-default class="btn btn-primary col-md-12" style="text-align: left">
-                    <span class="glyphicon glyphicon-tint"></span>&nbsp;
-                    <span data-translate>Open</span>
-                  </span>
-                </a>
-                <br /><br />
-                <a data-ng-show="tip.postpone_superpower" data-ng-click="tip_extend(tip.id)" class="btn btn-xs btn-warning"
-                   popover="{{ 'Postpone Tip expiration date' | translate }}" popover-placement="top" popover-trigger="mouseenter">
-                  <i class="glyphicon glyphicon-time"></i>
-                </a>
-                <a data-ng-show="tip.can_delete_submission" data-ng-click="tip_delete(tip.id, true)" class="btn btn-xs btn-danger"
-                   popover="{{ 'Delete Tip (Globablly)' | translate }}" popover-placement="top" popover-trigger="mouseenter">
-                  <span class="glyphicon glyphicon-trash"></span>
-                </a>
-                <br /><br />
-                <div>
-                 <b><span data-translate>Accesses</span>:</b>
-                 {{tip.access_counter}} 
-                <div>
-              </td>
-              <td class="col-md-4">
-                <div class="row">
-                  <span class="col-md-6">
-                    <b><span data-translate>Submission</span>:</b>
-                  </span>
-                  <span class="col-md-6">
-                    {{tip.creation_date | date:'dd-MM-yyyy HH:mm' }}
-                  </span>
-                </div>
-                <div class="row">
-                  <span class="col-md-6">
-                    <b><span data-translate>Expiration</span>:</b>
-                  </span>
-                  <span class="col-md-6">
-                    {{tip.expiration_date | date:'dd-MM-yyyy HH:mm' }}
-                  </span>
-                </div>
-                <div class="row">
-                  <span class="col-md-6">
-                    <b><span data-translate>Last Access</span>:</b>
-                  </span>
-                  <span class="col-md-6">
-                    {{tip.last_access | date:'dd-MM-yyyy HH:mm' }}
-                  </span>
-                </div>
-              </td>
-              <td class="col-md-2">
-                <div>
-                  <b><span data-translate>Files</span>:</b>
-                  {{tip.files_number}}
-                </div>
-                <div>
-                  <b><span data-translate>Comments</span>:</b>
-                  {{tip.comments_number}}
-                </div>
-              </td>
-              <td>
-                <div>
-                  <b><span data-translate>Context Name</span>:</b>
-                  {{tip.context_name}}
-                <div>
-                <div data-ng-repeat="entry in tip.preview">
-                  <b>{{entry.label}}:</b> {{entry.value}}
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </th>
+          <th>
+            <span data-ng-click="sortKey = 'label'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-tag"></i>
+              <span data-translate>Label</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'label'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+          <th>
+            <span data-ng-click="sortKey = 'creation_date'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-time"></i>
+              <span data-translate>Submission date</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'creation_date'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+          <th>
+            <span data-ng-click="sortKey = 'update_date'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-time"></i>
+              <span data-translate>Last update</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'update_date'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+          <th>
+            <span data-ng-click="sortKey = 'expiration_date'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-hourglass"></i>
+              <span data-translate>Expiration date</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'expiration_date'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+          <th>
+            <span data-ng-click="sortKey = 'files'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-file"></i>
+              <span data-translate>Files</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'files'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+          <th>
+            <span data-ng-click="sortKey = 'comments'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-comment"></i>
+              <span data-translate>Comments</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'comments'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+          <th>
+            <span data-ng-click="sortKey = 'messages'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-envelope"></i>
+              <span data-translate>Messages</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'messages'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+          <th>
+            <span>
+              <i class="glyphicon glyphicon-send"></i>
+              <span data-translate>Connection</span>
+            </span>
+          </th>
+          <th>
+            <span>
+              <i class="glyphicon glyphicon-list-alt"></i>
+              <span data-translate>Preview</span>
+            </span>
+          </th>
+          <th data-ng-if="::node.enable_experimental_features">
+            <span data-ng-click="sortKey = 'score'; sortReverse = !sortReverse">
+              <i class="glyphicon glyphicon-flash"></i>
+              <span data-translate>Score</span>
+              <span class="btn btn-xs" data-ng-show="sortKey == 'score'">
+                <span data-ng-show="!sortReverse" class="glyphicon glyphicon-triangle-bottom"></span>
+                <span data-ng-show="sortReverse" class="glyphicon glyphicon-triangle-top"></span>
+              </span>
+            </span>
+          </th>
+        </tr>
+      </thead>
+      <tbody id="tipListTableBody">
+        <tr id="tip-{{$index}}" data-ng-repeat="tip in tips | orderBy:sortKey:sortReverse | filter:search" data-ng-class="{'newTip': tip.new, 'selectedTip': isSelected(tip.id)}" class="tip-action-open" data-ng-click="go('/status/' + tip.id)">
+          <td>
+            <span data-ng-if="preferences.can_postpone_expiration || preferences.can_delete_submission" >
+              <span class="btn btn-xs btn-default" data-ng-if="isSelected(tip.id)" data-ng-click="tip_switch(tip.id); $event.stopPropagation();">
+                <i class="glyphicon glyphicon-check"></i>
+              </span>
+              <span class="btn btn-xs btn-default" data-ng-if="!isSelected(tip.id)" data-ng-click="tip_switch(tip.id); $event.stopPropagation();">
+                <i class="glyphicon glyphicon-unchecked"></i>
+              </span>
+            </span>
+            <form name="TipExportForm" class="pull-right"
+                method="POST" action="{{::'/rtip/' + tip.id + '/export'}}"
+                data-ng-click="$event.stopPropagation()"
+                uib-popover="{{'Export' | translate}}" popover-placement="top" popover-trigger="mouseenter"
+                novalidate>
+              <input type="hidden" name="session" value="{{ session.id }}" />
+              <button id="tip-action-export" class="btn btn-xs btn-default">
+                <i class="glyphicon glyphicon-save"></i>
+              </button>
+            </form>
+          </td>
+          <td class="tipFileName">{{::tip.creation_date | date:'yyyyMMdd'}}-{{::tip.progressive}}</td>
+          <td data-ng-if="contexts.length > 1">{{::tip.context_name}}</td>
+          <td>{{::tip.label}}</td>
+          <td>{{::tip.creation_date | date:'dd-MM-yyyy HH:mm'}}</td>
+          <td>{{::tip.update_date | date:'dd-MM-yyyy HH:mm'}}</td>
+          <td>{{::tip.expiration_date | date:'dd-MM-yyyy HH:mm'}}</td>
+          <td>{{::tip.file_counter}}</td>
+          <td>{{::tip.comment_counter}}</td>
+          <td>{{::tip.message_counter}}</td>
+          <td>
+            <span data-ng-if="tip.tor2web"
+              class="label label-warning"
+              uib-popover="{{'The connection used to send this submission has been secured with HTTPS ensuring confidentiality.' | translate}}" popover-placement="right" popover-trigger="mouseenter"
+              data-translate>HTTPS</span>
+            <span data-ng-if="!tip.tor2web"
+              class="label label-success"
+              uib-popover="{{'The connection used to send this submission has been secured with Tor ensuring confidentiality and anonymity.' | translate}}" popover-placement="right" popover-trigger="mouseenter"
+              data-translate>Tor</span>
+          </td>
+          <td>
+            <div data-ng-repeat="field in tip.preview_schema" data-ng-init="fieldAnswers = tip.preview; preview=true" data-ng-include="'views/partials/tip_field.html'"></div>
+          </td>
+          <td data-ng-if="::node.enable_experimental_features">{{::tip.total_score}}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>

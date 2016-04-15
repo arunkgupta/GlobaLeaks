@@ -1,0 +1,188 @@
+#SubmissionTabsContentBox {
+  margin-bottom: 1.25em;
+}
+
+#ContextClarification {
+  font-size: 1.125em;
+}
+
+#ContextClarification, .StepsDescription {
+  white-space: pre-wrap;
+}
+
+.contextCards, .receiverCards {
+  position: relative;
+}
+
+.contextCard, .contextListElem, .receiverCard {
+  margin: 5px;
+  padding: 1.25em;
+  background-color: white;
+  border: 1px solid #DDD;
+  border-radius: 0.8em;
+  word-wrap: break-word;
+}
+
+.contextCardTitle, .contextListElemTitle, .receiverCardTitle {
+  font-weight: bold;
+}
+
+.contextCardTitle, .receiverCardTitle {
+  margin-bottom: 0.8em;
+}
+
+.receiverCard.selected, .contextCard:hover {
+  background-color: #fcf8e3;
+}
+
+.receiverCard.forcefullySelected {
+  background-color: #a0c5e5;
+}
+
+.receiverCard.disabled {
+  background-color: #f2dede;
+}
+
+.fieldAnswerEntry {
+  margin-top: 15px;
+}
+
+.fieldAnswerEntryFirst {
+  margin-top: 0px;
+}
+
+.fieldAnswerEntryLast {
+  margin-bottom: 0.8em;
+}
+
+.fieldAnswerEntryLabel:after {
+  content:'';
+  display:block;
+  clear: both;
+}
+
+.submissionFieldInput {
+  padding-left: 0.8em;
+}
+
+#StepTitle {
+  font-size: 1.25em;
+  font-weight: bold;
+  margin-bottom: 1.25em;
+}
+
+.fileName {
+  word-break: break-all;
+  word-wrap: break-word;
+}
+
+#MaxSelectableReceiverBox {
+  margin-bottom: 30px;
+}
+
+#KeyCodeThanks1 {
+  font-size: 30px;
+  font-weight: bold;
+}
+
+#KeyCodeThanks2 {
+  font-size: 24px;
+}
+
+#KeyCodeBox {
+  background-color: #F5F5F5;
+  border: 1px solid #222;
+  margin-top: 0.8em;
+  margin-bottom: 1.25em;
+  padding: 0.8em;
+}
+
+#KeyCodeHintBox {
+  position: relative;
+  padding: 0.8em;
+  background: #FFF;
+  border-radius: 5px;
+  margin-left: 30px;
+  border: 1px solid rgb(204, 204, 204);
+  box-shadow: 2px 1px 5px #888888;
+}
+
+#KeyCodeHintBox:after {
+  content: '';
+  position: absolute;
+  border-style: solid;
+  border-width: 15px 15px 15px 0;
+  border-color: transparent #ccc;
+  display: block;
+  width: 0;
+  left: -15px;
+  top: 17px;
+  z-index: 1;
+}
+
+#Receipt {
+  padding-bottom: 1.25em;
+}
+
+#ReceiptButton {
+  font-size: 1em;
+}
+
+#KeyCode {
+  margin: 1.25em auto;
+  padding: 1.25em;
+  width: 80%;
+  text-align: center;
+  font-family: monospace;
+  font-size: 1.25em;
+  font-weight: bold;
+  background-color: #FFF;
+  border-radius: 0.8em;
+  direction: ltr;
+}
+
+#SubmissionButtons button {
+  margin-left: 0px;
+  margin-right: 0.8em;
+}
+
+#FileUploadsHeader {
+  font-size: 1.25em;
+  margin-bottom: 1.25em;
+}
+
+.fileuploadprogress {
+  position: relative;
+  width: 11.25em;
+  bottom: 0px;
+}
+
+#ContextDescription, .FieldDescription {
+  color: #777;
+}
+
+.TOS {
+  display: block;
+  padding: 9.5px;
+  margin: 0 0 0.8em;
+  font-size: 13px;
+  line-height: 1.42857143;
+  color: #333;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background-color: #f5f5f5;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+.radio label, .checkbox label {
+  display: block;
+}
+
+.cc-text-1 {
+  font-size: 35px;
+}
+
+.cc-text-2 {
+  font-size: 1.25em;
+}

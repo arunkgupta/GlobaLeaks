@@ -4,16 +4,24 @@ GlobaLeaks ORM Models definitions.
 """
 from __future__ import absolute_import
 
-import copy
-
-from storm.locals import Bool, DateTime, Int, Reference, ReferenceSet, Unicode, Storm, JSON
-
-from globaleaks.settings import transact
-from globaleaks.utils.utility import datetime_now, uuid4
-from globaleaks.utils.validator import shorttext_v, longtext_v, shortlocal_v
-from globaleaks.utils.validator import longlocal_v, dict_v
+from storm.expr import And
+from storm.locals import Bool, Int, Reference, ReferenceSet, Unicode, Storm, JSON
 
 from .properties import MetaModel, DateTime
+
+from globaleaks import __version__, DATABASE_VERSION, LANGUAGES_SUPPORTED_CODES
+
+from globaleaks.models.validators import shorttext_v, longtext_v, \
+    shortlocal_v, longlocal_v, shorturl_v, longurl_v
+
+from globaleaks.orm import transact
+from globaleaks.security import hash_password
+from globaleaks.settings import GLSettings
+from globaleaks.utils.utility import datetime_now, datetime_null, uuid4
+
+
+empty_localization = {}
+
 
 def db_forge_obj(store, mock_class, mock_fields):
     obj = mock_class()
@@ -22,9 +30,11 @@ def db_forge_obj(store, mock_class, mock_fields):
     store.add(obj)
     return obj
 
+
 @transact
 def forge_obj(store, mock_class, mock_fields):
     return db_forge_obj(store, mock_class, mock_fields)
+
 
 class BaseModel(Storm):
     """
@@ -38,16 +48,17 @@ class BaseModel(Storm):
 
     # initialize empty list for the base classes
     unicode_keys = []
-    localized_strings = []
+    localized_keys = []
     int_keys = []
     bool_keys = []
+    datetime_keys = []
     json_keys = []
 
-    def __init__(self, attrs=None):
-        self.update(attrs)
+    def __init__(self, values=None):
+        self.update(values)
 
     @classmethod
-    def new(cls, store, attrs=None):
+    def new(cls, store, values=None):
         """
         Add a new object to the store, filling its data with the attributes
         given.
@@ -55,64 +66,62 @@ class BaseModel(Storm):
         :param store:
         :param attrs: The dictionary containing initial values for the
         """
-        obj = cls(attrs)
+        obj = cls(values)
         store.add(obj)
         return obj
 
-    def update(self, attrs=None):
+    def update(self, values=None):
         """
         Updated Models attributes from dict.
         """
         # May raise ValueError and AttributeError
-        if attrs is None:
+        if values is None:
             return
 
-        # Dev note: these fields describe which key are expected in the
-        # constructor. if not available, an error is raise.
-        # other elements different from bool, unicode and int, can't be
-        # processed by the generic "update" method and need to be assigned
-        # to the object, [ but before commit(), if they are NOT NULL in the
-        # SQL file ]
-        cls_unicode_keys = getattr(self, "unicode_keys")
-        cls_int_keys = getattr(self, "int_keys")
-        cls_bool_keys = getattr(self, "bool_keys")
-        cls_json_keys = getattr(self, "json_keys")
-        cls_localized_keys = getattr(self, "localized_strings")
+        for k in getattr(self, 'unicode_keys'):
+            if k in values and values[k] is not None:
+                value = unicode(values[k])
+                setattr(self, k, value)
 
-        for k in cls_unicode_keys:
-            value = unicode(attrs[k])
-            setattr(self, k, value)
+        for k in getattr(self, 'int_keys'):
+            if k in values and values[k] is not None:
+                value = int(values[k])
+                setattr(self, k, value)
 
-        for k in cls_int_keys:
-            value = int(attrs[k])
-            setattr(self, k, value)
+        for k in getattr(self, 'datetime_keys'):
+            if k in values and values[k] is not None:
+                value = values[k]
+                setattr(self, k, value)
 
-        for k in cls_json_keys:
-            value = attrs[k]
-            setattr(self, k, value)
+        for k in getattr(self, 'bool_keys'):
+            if k in values and values[k] is not None:
+                if values[k] == u'true':
+                    value = True
+                elif values[k] == u'false':
+                    value = False
+                else:
+                    value = bool(values[k])
+                setattr(self, k, value)
 
-        for k in cls_bool_keys:
-            if attrs[k] == u'true':
-                value = True
-            elif attrs[k] == u'false':
-                value = False
-            else:
-                value = bool(attrs[k])
-            setattr(self, k, value)
+        for k in getattr(self, 'localized_keys'):
+            if k in values and values[k] is not None:
+                value = values[k]
+                previous = getattr(self, k)
 
-        for k in cls_localized_keys:
-            value = attrs[k]
-            previous = getattr(self, k)
-            if previous and isinstance(previous, dict):
-                previous.update(value)
-                setattr(self, k, previous)
-            else:
+                if previous and isinstance(previous, dict):
+                    previous.update(value)
+                    setattr(self, k, previous)
+                else:
+                    setattr(self, k, value)
+
+        for k in getattr(self, 'json_keys'):
+            if k in values and values[k] is not None:
+                value = values[k]
                 setattr(self, k, value)
 
     def __repr___(self):
-        attrs = ['{}={}'.format(attr, getattr(self, attr))
-                 for attr in self._public_attrs]
-        return '<%s model with values %s>' % (self.__name__, ', '.join(attrs))
+        values = ['{}={}'.format(attr, getattr(self, attr)) for attr in self._public_attrs]
+        return '<%s model with values %s>' % (self.__name__, ', '.join(values))
 
     def __setattr__(self, name, value):
         # harder better faster stronger
@@ -137,112 +146,122 @@ class BaseModel(Storm):
 
 class Model(BaseModel):
     """
-    Base class for working the database, already integrating an id, and a
-    creation_date.
+    Base class for working the database, already integrating an id.
     """
     __storm_table__ = None
     id = Unicode(primary=True, default_factory=uuid4)
-    creation_date = DateTime(default_factory=datetime_now)
-    # Note on creation last_update and last_access may be out of sync by some
-    # seconds.
 
     @classmethod
     def get(cls, store, obj_id):
         return store.find(cls, cls.id == obj_id).one()
-
-    @classmethod
-    def delete(self, store):
-        store.remove(self)
 
 
 class User(Model):
     """
     This model keeps track of globaleaks users.
     """
+    creation_date = DateTime(default_factory=datetime_now)
+
     username = Unicode(validator=shorttext_v)
+
     password = Unicode()
     salt = Unicode()
+
+    deletable = Bool(default=True)
+
+    name = Unicode(validator=shorttext_v)
+    description = JSON(validator=longlocal_v)
+
     role = Unicode()
     state = Unicode()
-    last_login = DateTime()
+    last_login = DateTime(default_factory=datetime_null)
+    mail_address = Unicode()
     language = Unicode()
     timezone = Int()
-    password_change_needed = Bool()
-    password_change_date = DateTime()
+    password_change_needed = Bool(default=True)
+    password_change_date = DateTime(default_factory=datetime_null)
 
-    _roles = [ u'admin', u'receiver' ]
-    _states = [ u'disabled', u'enabled']
+    # roles: 'admin', 'receiver', 'custodian'
+    # states: 'disabled', 'enabled'
 
-    unicode_keys = [ 'username', 'password', 'salt', 'role',
-                     'state', 'language' ]
-    int_keys = [ 'timezone', 'password_change_needed' ]
+    # BEGIN of PGP key fields
+    pgp_key_info = Unicode(default=u'')
+    pgp_key_fingerprint = Unicode(default=u'')
+    pgp_key_public = Unicode(default=u'')
+    pgp_key_expiration = DateTime(default_factory=datetime_null)
+    pgp_key_status = Unicode(default=u'disabled') # 'disabled', 'enabled'
+    # END of PGP key fields
+
+    img_id = Unicode()
+
+    unicode_keys = ['username', 'role', 'state',
+                    'language', 'mail_address', 'name']
+
+    localized_keys = ['description']
+
+    int_keys = ['timezone']
+
+    bool_keys = ['deletable', 'password_change_needed']
 
 
 class Context(Model):
     """
-    This model keeps track of specific contexts settings.
+    This model keeps track of contexts settings.
     """
-    # steps = [
-    #     {
-    #         'name': local_dict,
-    #         'type': 'fields',
-    #         'fields': [field_group_id1,
-    #                    field_group_id2]
-    #     },
-    #     {
-    #         'name': local_dict,
-    #         'type': 'receiver',
-    #         'options': {
-    #             'show_small_receiver': True,
-    #             'selectable_receiver': True,
-    #             'show_small_cards': False,
-    #             'maximum_selectable_receivers': 10,
-    #             'select_all_receivers': True
-    #         }
-    #     }
-    # ]
+    show_small_receiver_cards = Bool(default=False)
+    show_context = Bool(default=True)
+    show_recipients_details = Bool(default=False)
+    allow_recipients_selection = Bool(default=False)
+    maximum_selectable_receivers = Int(default=0)
+    select_all_receivers = Bool(default=False)
 
-    selectable_receiver = Bool()
-    show_small_cards = Bool()
-    show_receivers = Bool()
-    maximum_selectable_receivers = Int()
-    select_all_receivers = Bool()
+    enable_comments = Bool(default=True)
+    enable_messages = Bool(default=False)
+    enable_two_way_comments = Bool(default=True)
+    enable_two_way_messages = Bool(default=True)
+    enable_attachments = Bool(default=True)
 
-    tip_max_access = Int()
-    file_max_download = Int()
     tip_timetolive = Int()
-    submission_timetolive = Int()
-    last_update = DateTime()
 
-    # localized stuff
-    name = JSON()
-    description = JSON()
-    receiver_introduction = JSON()
+    # localized strings
+    name = JSON(validator=shortlocal_v)
+    description = JSON(validator=longlocal_v)
+    recipients_clarification = JSON(validator=longlocal_v)
 
-    # receivers = ReferenceSet(
-    #                         Context.id,
-    #                         ReceiverContext.context_id,
-    #                         ReceiverContext.receiver_id,
-    #                         Receiver.id)
+    status_page_message = JSON(validator=longlocal_v)
 
-    postpone_superpower = Bool()
-    can_delete_submission = Bool()
+    show_receivers_in_alphabetical_order = Bool(default=False)
 
-    show_small_cards = Bool()
-    show_receivers = Bool()
-    enable_private_messages = Bool()
+    presentation_order = Int(default=0)
 
-    presentation_order = Int()
+    questionnaire_id = Unicode()
 
-    unicode_keys = []
-    localized_strings = ['name', 'description', 'receiver_introduction']
-    int_keys = [ 'tip_max_access', 'file_max_download',
-                 'maximum_selectable_receivers',
-                 'presentation_order' ]
-    bool_keys = [ 'selectable_receiver', 'select_all_receivers',
-                  'postpone_superpower', 'can_delete_submission',
-                  'show_small_cards', 'show_receivers', "enable_private_messages" ]
+    img_id = Unicode()
 
+    unicode_keys = ['questionnaire_id']
+
+    localized_keys = ['name', 'description', 'recipients_clarification', 'status_page_message']
+
+    int_keys = [
+      'tip_timetolive',
+      'maximum_selectable_receivers',
+      'presentation_order',
+      'steps_navigation_requires_completion'
+    ]
+
+    bool_keys = [
+      'select_all_receivers',
+      'show_small_receiver_cards',
+      'show_context',
+      'show_recipients_details',
+      'show_receivers_in_alphabetical_order',
+      'allow_recipients_selection',
+      'enable_comments',
+      'enable_messages',
+      'enable_two_way_comments',
+      'enable_two_way_messages',
+      'enable_attachments'
+    ]
 
 class InternalTip(Model):
     """
@@ -254,26 +273,27 @@ class InternalTip(Model):
     All of those element has a Storm Reference with the InternalTip.id,
     never vice-versa
     """
+    creation_date = DateTime(default_factory=datetime_now)
+    update_date = DateTime(default_factory=datetime_now)
+
     context_id = Unicode()
-    # context = Reference(InternalTip.context_id, Context.id)
-    # comments = ReferenceSet(InternalTip.id, Comment.internaltip_id)
-    # receivertips = ReferenceSet(InternalTip.id, ReceiverTip.internaltip_id)
-    # internalfiles = ReferenceSet(InternalTip.id, InternalFile.internaltip_id)
-    # receivers = ReferenceSet(InternalTip.id, Receiver.id)
 
-    wb_steps = JSON()
+    questionnaire_hash = Unicode()
+    preview = JSON()
+    progressive = Int(default=0)
+    tor2web = Bool(default=False)
+    total_score = Int(default=0)
     expiration_date = DateTime()
-    last_activity = DateTime()
 
-    # the LIMITS are stored in InternalTip because and admin may
-    # need change them. These values are copied by Context
-    access_limit = Int()
-    download_limit = Int()
+    identity_provided = Bool(default=False)
+    identity_provided_date = DateTime(default_factory=datetime_null)
 
-    mark = Unicode()
+    enable_two_way_comments = Bool(default=True)
+    enable_two_way_messages = Bool(default=True)
+    enable_attachments = Bool(default=True)
+    enable_whistleblower_identity = Bool(default=False)
 
-    _marker = [u'submission', u'finalize', u'first', u'second']
-    # N.B. *_keys = It's created without initializing dict
+    new = Int(default=True)
 
 
 class ReceiverTip(Model):
@@ -284,17 +304,21 @@ class ReceiverTip(Model):
     """
     internaltip_id = Unicode()
     receiver_id = Unicode()
-    # internaltip = Reference(ReceiverTip.internaltip_id, InternalTip.id)
-    # receiver = Reference(ReceiverTip.receiver_id, Receiver.id)
 
-    last_access = DateTime(default_factory=datetime_now)
-    access_counter = Int()
-    notification_date = DateTime()
-    mark = Unicode()
+    last_access = DateTime(default_factory=datetime_null)
+    access_counter = Int(default=0)
 
-    _marker = [u'not notified', u'notified', u'unable to notify', u'disabled',
-               u'skipped']
-    # N.B. *_keys = It's created without initializing dict
+    label = Unicode(default=u'')
+
+    can_access_whistleblower_identity = Bool(default=False)
+
+    new = Int(default=True)
+
+    enable_notifications = Bool(default=True)
+
+    unicode_keys = ['label']
+
+    bool_keys = ['enable_notifications']
 
 
 class WhistleblowerTip(Model):
@@ -305,10 +329,46 @@ class WhistleblowerTip(Model):
     download.
     """
     internaltip_id = Unicode()
-    # internaltip = Reference(WhistleblowerTip.internaltip_id, InternalTip.id)
     receipt_hash = Unicode()
-    last_access = DateTime()
-    access_counter = Int()
+
+    last_access = DateTime(default_factory=datetime_null)
+    access_counter = Int(default=0)
+
+
+class IdentityAccessRequest(Model):
+    """
+    This model keeps track of identity access requests by receivers and
+    of the answers by custodians.
+    """
+    receivertip_id = Unicode()
+    request_date = DateTime(default_factory=datetime_now)
+    request_motivation = Unicode(default=u'')
+    reply_date = DateTime(default_factory=datetime_null)
+    reply_user_id = Unicode()
+    reply_motivation = Unicode(default=u'')
+    reply = Unicode(default=u'pending')
+
+
+class InternalFile(Model):
+    """
+    This model keeps track of files before they are packaged
+    for specific receivers.
+    """
+    creation_date = DateTime(default_factory=datetime_now)
+
+    internaltip_id = Unicode()
+
+    name = Unicode(validator=longtext_v)
+    file_path = Unicode()
+
+    content_type = Unicode()
+    size = Int()
+
+    new = Int(default=True)
+    
+    submission = Int(default = False)
+
+    processing_attempts = Int(default=0)
 
 
 class ReceiverFile(Model):
@@ -318,82 +378,38 @@ class ReceiverFile(Model):
     internaltip_id = Unicode()
     internalfile_id = Unicode()
     receiver_id = Unicode()
-    receiver_tip_id = Unicode()
-    # internalfile = Reference(ReceiverFile.internalfile_id, InternalFile.id)
-    # receiver = Reference(ReceiverFile.receiver_id, Receiver.id)
-    # internaltip = Reference(ReceiverFile.internaltip_id, InternalTip.id)
-    # receiver_tip = Reference(ReceiverFile.receiver_tip_id, ReceiverTip.id)
-
+    receivertip_id = Unicode()
     file_path = Unicode()
     size = Int()
-    downloads = Int()
-    last_access = DateTime()
+    downloads = Int(default=0)
+    last_access = DateTime(default_factory=datetime_null)
 
-    mark = Unicode()
-    _marker = [u'not notified', u'notified', u'unable to notify', u'disabled',
-               u'skipped']
+    new = Int(default=True)
 
     status = Unicode()
-    _status_list = [u'reference', u'encrypted', u'unavailable', u'nokey']
+    # statuses: 'reference', 'encrypted', 'unavailable', 'nokey'
     # reference = receiverfile.file_path reference internalfile.file_path
     # encrypted = receiverfile.file_path is an encrypted file for
     #                                    the specific receiver
     # unavailable = the file was supposed to be available but something goes
     # wrong and now is lost
 
-    # N.B. *_keys = It's created without initializing dict
-
-
-class InternalFile(Model):
-    """
-    This model keeps track of files before they are packaged
-    for specific receivers
-    """
-    internaltip_id = Unicode()
-    # internaltip = Reference(InternalFile.internaltip_id, InternalTip.id)
-
-    name = Unicode(validator=longtext_v)
-    file_path = Unicode()
-
-    content_type = Unicode()
-    description = Unicode(validator=longtext_v)
-    size = Int()
-
-    mark = Unicode()
-    _marker = [u'not processed', u'locked', u'ready', u'delivered']
-    # 'not processed' = submission time
-    # 'ready' = processed in ReceiverTip, available for usage
-    # 'delivered' = the file need to stay on DB, but from the
-    #               disk has been deleted
-    #  it happens when GPG encryption is present in the whole Receiver group.
-    # 'locked' = the file is under process by delivery scheduler
-
-    # N.B. *_keys = It's created without initializing dict
-
 
 class Comment(Model):
     """
     This table handle the comment collection, has an InternalTip referenced
     """
+    creation_date = DateTime(default_factory=datetime_now)
+
     internaltip_id = Unicode()
 
     author = Unicode()
     content = Unicode(validator=longtext_v)
 
-    # In case of system_content usage, content has repr() equiv
-    system_content = JSON()
-
     type = Unicode()
-    _types = [u'receiver', u'whistleblower', u'system']
-    mark = Unicode()
-    _marker = [
-        u'not notified',
-        u'notified',
-        u'unable to notify',
-        u'disabled',
-        u'skipped']
+    # types: 'receiver', 'whistleblower'
 
-    # N.B. *_keys = It's created without initializing dict
+    new = Int(default=True)
 
 
 class Message(Model):
@@ -401,371 +417,535 @@ class Message(Model):
     This table handle the direct messages between whistleblower and one
     Receiver.
     """
+    creation_date = DateTime(default_factory=datetime_now)
+
     receivertip_id = Unicode()
     author = Unicode()
     content = Unicode(validator=longtext_v)
-    visualized = Bool()
 
     type = Unicode()
-    _types = [u'receiver', u'whistleblower']
-    mark = Unicode()
-    _marker = [
-        u'not notified',
-        u'notified',
-        u'unable to notify',
-        u'disabled',
-        u'skipped']
+    # types: 'receiver', whistleblower'
+
+    new = Int(default=True)
 
 
 class Node(Model):
     """
-    This table has only one instance, has the "id", but would not exists a
-    second element of this table. This table acts, more or less, like the
-    configuration file of the previous GlobaLeaks release (and some of the GL
-    0.1 details are specified in Context)
-
     This table represent the System-wide settings
     """
-    name = Unicode(validator=shorttext_v)
-    public_site = Unicode()
-    hidden_service = Unicode()
-    email = Unicode()
-    receipt_salt = Unicode()
-    last_update = DateTime()
-    # this has a dedicated validator in update_node()
-    receipt_regexp = Unicode()
+    version = Unicode(default=unicode(__version__))
+    version_db = Unicode(default=unicode(DATABASE_VERSION))
 
-    languages_enabled = JSON()
-    default_language = Unicode()
-    default_timezone = Int()
+    name = Unicode(validator=shorttext_v, default=u'')
 
-    # localized string
-    description = JSON()
-    presentation = JSON()
-    footer = JSON()
-    subtitle = JSON()
-    security_awareness_title = JSON()
-    security_awareness_text = JSON()
+    basic_auth = Bool(default=False)
+    basic_auth_username = Unicode(default=u'')
+    basic_auth_password = Unicode(default=u'')
 
-    # Here is set the time frame for the stats publicly exported by the node.
-    # Expressed in hours
-    stats_update_time = Int()
+    public_site = Unicode(validator=shorttext_v, default=u'')
+    hidden_service = Unicode(validator=shorttext_v, default=u'')
+
+    receipt_salt = Unicode(validator=shorttext_v)
+
+    languages_enabled = JSON(default=LANGUAGES_SUPPORTED_CODES)
+    default_language = Unicode(validator=shorttext_v, default=u'en')
+    default_timezone = Int(default=0)
+
+    description = JSON(validator=longlocal_v, default=empty_localization)
+    presentation = JSON(validator=longlocal_v, default=empty_localization)
+    footer = JSON(validator=longlocal_v, default=empty_localization)
+    security_awareness_title = JSON(validator=longlocal_v, default=empty_localization)
+    security_awareness_text = JSON(validator=longlocal_v, default=empty_localization)
 
     # Advanced settings
-    maximum_namesize = Int()
-    maximum_textsize = Int()
-    maximum_filesize = Int()
-    tor2web_admin = Bool()
-    tor2web_submission = Bool()
-    tor2web_receiver = Bool()
-    tor2web_unauth = Bool()
-    allow_unencrypted = Bool()
+    maximum_namesize = Int(default=128)
+    maximum_textsize = Int(default=4096)
+    maximum_filesize = Int(default=30)
+    tor2web_admin = Bool(default=True)
+    tor2web_custodian = Bool(default=True)
+    tor2web_whistleblower = Bool(default=False)
+    tor2web_receiver = Bool(default=True)
+    tor2web_unauth = Bool(default=True)
+    allow_unencrypted = Bool(default=False)
+    disable_encryption_warnings = Bool(default=False)
+    allow_iframes_inclusion = Bool(default=False)
+    submission_minimum_delay = Int(default=10)
+    submission_maximum_ttl = Int(default=10800)
 
-    # privileges configurable in node/context/receiver
-    postpone_superpower = Bool()
-    can_delete_submission = Bool()
+    # privileges of receivers
+    can_postpone_expiration = Bool(default=False)
+    can_delete_submission = Bool(default=False)
+    can_grant_permissions = Bool(default=False)
 
-    ahmia = Bool()
+    ahmia = Bool(default=False)
+    allow_indexing = Bool(default=False)
+
     wizard_done = Bool(default=False)
 
+    disable_submissions = Bool(default=False)
     disable_privacy_badge = Bool(default=False)
     disable_security_awareness_badge = Bool(default=False)
     disable_security_awareness_questions = Bool(default=False)
+    disable_key_code_hint = Bool(default=False)
+    disable_donation_panel = Bool(default=False)
 
-    whistleblowing_question = JSON()
-    whistleblowing_button = JSON()
+    enable_captcha = Bool(default=True)
+    enable_proof_of_work = Bool(default=True)
 
-    enable_custom_privacy_badge = Bool()
-    custom_privacy_badge_tbb = JSON()
-    custom_privacy_badge_tor = JSON()
-    custom_privacy_badge_none = JSON()
+    enable_experimental_features = Bool(default=False)
 
-    exception_email = Unicode()
+    whistleblowing_question = JSON(validator=longlocal_v, default=empty_localization)
+    whistleblowing_button = JSON(validator=longlocal_v, default=empty_localization)
+    whistleblowing_receipt_prompt = JSON(validator=longlocal_v, default=empty_localization)
 
-    unicode_keys = ['name', 'public_site', 'email', 'hidden_service',
-                    'exception_email', 'default_language', 'receipt_regexp']
-    int_keys = [ 'stats_update_time', 'maximum_namesize',
-                 'maximum_textsize', 'maximum_filesize', 'default_timezone' ]
-    bool_keys = [ 'tor2web_admin', 'tor2web_receiver', 'tor2web_submission',
-                  'tor2web_unauth', 'postpone_superpower',
-                  'can_delete_submission', 'ahmia', 'allow_unencrypted',
-                  'disable_privacy_badge', 'disable_security_awareness_badge',
-                  'disable_security_awareness_questions', 'enable_custom_privacy_badge' ]
-                # wizard_done is not checked because it's set by the backend
-    localized_strings = [ 'description', 'presentation', 'footer', 'subtitle',
-                          'security_awareness_title',
-                          'security_awareness_text', 'whistleblowing_question',
-                          'whistleblowing_button', 'custom_privacy_badge_tbb',
-                          'custom_privacy_badge_tor', 'custom_privacy_badge_none' ]
+    simplified_login = Bool(default=True)
+
+    enable_custom_privacy_badge = Bool(default=False)
+    custom_privacy_badge_tor = JSON(validator=longlocal_v, default=empty_localization)
+    custom_privacy_badge_none = JSON(validator=longlocal_v, default=empty_localization)
+
+    header_title_homepage = JSON(validator=longlocal_v, default=empty_localization)
+    header_title_submissionpage = JSON(validator=longlocal_v, default=empty_localization)
+    header_title_receiptpage = JSON(validator=longlocal_v, default=empty_localization)
+    header_title_tippage = JSON(validator=longlocal_v, default=empty_localization)
+
+    widget_comments_title = JSON(validator=shortlocal_v, default=empty_localization)
+    widget_messages_title = JSON(validator=shortlocal_v, default=empty_localization)
+    widget_files_title = JSON(validator=shortlocal_v, default=empty_localization)
+
+    landing_page = Unicode(default=u'homepage')
+
+    contexts_clarification = JSON(validator=longlocal_v, default=empty_localization)
+    show_small_context_cards = Bool(default=False)
+    show_contexts_in_alphabetical_order = Bool(default=False)
+
+    threshold_free_disk_megabytes_high = Int(default=200)
+    threshold_free_disk_megabytes_medium = Int(default=500)
+    threshold_free_disk_megabytes_low = Int(default=1000)
+
+    threshold_free_disk_percentage_high = Int(default=3)
+    threshold_free_disk_percentage_medium = Int(default=5)
+    threshold_free_disk_percentage_low = Int(default=10)
+
+    context_selector_type = Unicode(validator=shorttext_v, default=u'list')
+
+    logo_id = Unicode()
+    css_id = Unicode()
+
+    unicode_keys = [
+        'name',
+        'public_site',
+        'hidden_service',
+        'default_language',
+        'landing_page',
+        'context_selector_type'
+    ]
+
+    int_keys = [
+        'maximum_namesize',
+        'maximum_textsize',
+        'maximum_filesize',
+        'default_timezone',
+        'submission_minimum_delay',
+        'submission_maximum_ttl',
+        'threshold_free_disk_megabytes_high',
+        'threshold_free_disk_megabytes_medium',
+        'threshold_free_disk_megabytes_low',
+        'threshold_free_disk_percentage_high',
+        'threshold_free_disk_percentage_medium',
+        'threshold_free_disk_percentage_low'
+    ]
+
+    bool_keys = ['tor2web_admin', 'tor2web_receiver', 'tor2web_whistleblower',
+                 'tor2web_custodian', 'tor2web_unauth',
+                 'can_postpone_expiration', 'can_delete_submission', 'can_grant_permissions',
+                 'ahmia', 'allow_indexing',
+                 'allow_unencrypted',
+                 'disable_encryption_warnings',
+                 'simplified_login',
+                 'show_contexts_in_alphabetical_order',
+                 'show_small_context_cards',
+                 'allow_iframes_inclusion',
+                 'disable_submissions',
+                 'disable_privacy_badge', 'disable_security_awareness_badge',
+                 'disable_security_awareness_questions', 'enable_custom_privacy_badge',
+                 'disable_key_code_hint',
+                 'disable_donation_panel',
+                 'enable_captcha',
+                 'enable_proof_of_work',
+                 'enable_experimental_features']
+
+    # wizard_done is not checked because it's set by the backend
+
+    localized_keys = [
+        'description',
+        'presentation',
+        'footer',
+        'security_awareness_title',
+        'security_awareness_text',
+        'whistleblowing_question',
+        'whistleblowing_button',
+        'whistleblowing_receipt_prompt',
+        'custom_privacy_badge_tor',
+        'custom_privacy_badge_none',
+        'header_title_homepage',
+        'header_title_submissionpage',
+        'header_title_receiptpage',
+        'header_title_tippage',
+        'contexts_clarification',
+        'widget_comments_title',
+        'widget_messages_title',
+        'widget_files_title'
+    ]
 
 
 class Notification(Model):
-
     """
     This table has only one instance, and contain all the notification
     information for the node templates are imported in the handler, but
     settings are expected all at once.
     """
-    server = Unicode()
-    port = Int()
-    username = Unicode()
-    password = Unicode()
+    server = Unicode(validator=shorttext_v, default=u'demo.globaleaks.org')
+    port = Int(default=9267)
 
-    source_name = Unicode(validator=shorttext_v)
-    source_email = Unicode(validator=shorttext_v)
+    username = Unicode(validator=shorttext_v, default=u'hey_you_should_change_me')
+    password = Unicode(validator=shorttext_v, default=u'yes_you_really_should_change_me')
 
-    security = Unicode()
-    _security_types = [u'TLS', u'SSL']
+    source_name = Unicode(validator=shorttext_v, default=u'GlobaLeaks - CHANGE EMAIL ACCOUNT USED FOR NOTIFICATION')
+    source_email = Unicode(validator=shorttext_v, default=u'notification@demo.globaleaks.org')
 
-    admin_anomaly_template = JSON()
+    security = Unicode(validator=shorttext_v, default=u'TLS')
+    # security_types: 'TLS', 'SSL'
 
-    encrypted_tip_template = JSON()
-    encrypted_tip_mail_title = JSON()
-    plaintext_tip_template = JSON()
-    plaintext_tip_mail_title = JSON()
+    # Admin
+    admin_pgp_alert_mail_title = JSON(validator=longlocal_v)
+    admin_pgp_alert_mail_template = JSON(validator=longlocal_v)
+    admin_anomaly_mail_template = JSON(validator=longlocal_v)
+    admin_anomaly_mail_title = JSON(validator=longlocal_v)
+    admin_anomaly_disk_low = JSON(validator=longlocal_v)
+    admin_anomaly_disk_medium = JSON(validator=longlocal_v)
+    admin_anomaly_disk_high = JSON(validator=longlocal_v)
+    admin_anomaly_activities = JSON(validator=longlocal_v)
+    admin_test_static_mail_template = JSON(validator=longlocal_v)
+    admin_test_static_mail_title = JSON(validator=longlocal_v)
 
-    encrypted_file_template = JSON()
-    encrypted_file_mail_title = JSON()
-    plaintext_file_template = JSON()
-    plaintext_file_mail_title = JSON()
+    # Receiver
+    tip_mail_template = JSON(validator=longlocal_v)
+    tip_mail_title = JSON(validator=longlocal_v)
+    file_mail_template = JSON(validator=longlocal_v)
+    file_mail_title = JSON(validator=longlocal_v)
+    comment_mail_template = JSON(validator=longlocal_v)
+    comment_mail_title = JSON(validator=longlocal_v)
+    message_mail_template = JSON(validator=longlocal_v)
+    message_mail_title = JSON(validator=longlocal_v)
+    tip_expiration_mail_template = JSON(validator=longlocal_v)
+    tip_expiration_mail_title = JSON(validator=longlocal_v)
+    pgp_alert_mail_title = JSON(validator=longlocal_v)
+    pgp_alert_mail_template = JSON(validator=longlocal_v)
+    receiver_notification_limit_reached_mail_template = JSON(validator=longlocal_v)
+    receiver_notification_limit_reached_mail_title = JSON(validator=longlocal_v)
 
-    encrypted_comment_template = JSON()
-    encrypted_comment_mail_title = JSON()
-    plaintext_comment_template = JSON()
-    plaintext_comment_mail_title = JSON()
+    export_template = JSON(validator=longlocal_v)
+    export_message_recipient = JSON(validator=longlocal_v)
+    export_message_whistleblower = JSON(validator=longlocal_v)
 
-    encrypted_message_template = JSON()
-    encrypted_message_mail_title = JSON()
-    plaintext_message_template = JSON()
-    plaintext_message_mail_title = JSON()
+    # Whistleblower Identity
+    identity_access_authorized_mail_template = JSON(validator=longlocal_v)
+    identity_access_authorized_mail_title = JSON(validator=longlocal_v)
+    identity_access_denied_mail_template = JSON(validator=longlocal_v)
+    identity_access_denied_mail_title = JSON(validator=longlocal_v)
+    identity_access_request_mail_template = JSON(validator=longlocal_v)
+    identity_access_request_mail_title = JSON(validator=longlocal_v)
+    identity_provided_mail_template = JSON(validator=longlocal_v)
+    identity_provided_mail_title = JSON(validator=longlocal_v)
 
-    pgp_expiration_alert = JSON()
-    pgp_expiration_notice = JSON()
+    disable_admin_notification_emails = Bool(default=False)
+    disable_custodian_notification_emails = Bool(default=False)
+    disable_receiver_notification_emails = Bool(default=False)
+    send_email_for_every_event = Bool(default=True)
 
-    zip_description = JSON()
+    tip_expiration_threshold = Int(default=72)
+    notification_threshold_per_hour = Int(default=20)
+    notification_suspension_time=Int(default=(2 * 3600))
+
+    exception_email_address = Unicode(validator=shorttext_v, default=u'globaleaks-stackexception@lists.globaleaks.org')
+    exception_email_pgp_key_info = Unicode(default=u'')
+    exception_email_pgp_key_fingerprint = Unicode(default=u'')
+    exception_email_pgp_key_public = Unicode(default=u'')
+    exception_email_pgp_key_expiration = DateTime(default_factory=datetime_null)
+    exception_email_pgp_key_status = Unicode(default=u'disabled')
 
     unicode_keys = [
         'server',
         'username',
         'password',
         'source_name',
-        'source_email']
-    localized_strings = [
-        'admin_anomaly_template',
-        'pgp_expiration_alert',
-        'pgp_expiration_notice',
-        'encrypted_tip_template',
-        'encrypted_tip_mail_title',
-        'plaintext_tip_template',
-        'plaintext_tip_mail_title',
-        'encrypted_file_template',
-        'encrypted_file_mail_title',
-        'plaintext_file_template',
-        'plaintext_file_mail_title',
-        'encrypted_comment_template',
-        'encrypted_comment_mail_title',
-        'plaintext_comment_template',
-        'plaintext_comment_mail_title',
-        'encrypted_message_template',
-        'encrypted_message_mail_title',
-        'plaintext_message_template',
-        'plaintext_message_mail_title',
-        'zip_description']
-    int_keys = ['port']
+        'source_email',
+        'security',
+        'exception_email_address'
+    ]
+
+    localized_keys = [
+        'admin_anomaly_mail_title',
+        'admin_anomaly_mail_template',
+        'admin_anomaly_disk_low',
+        'admin_anomaly_disk_medium',
+        'admin_anomaly_disk_high',
+        'admin_anomaly_activities',
+        'admin_pgp_alert_mail_title',
+        'admin_pgp_alert_mail_template',
+        'admin_test_static_mail_template',
+        'admin_test_static_mail_title',
+        'pgp_alert_mail_title',
+        'pgp_alert_mail_template',
+        'tip_mail_template',
+        'tip_mail_title',
+        'file_mail_template',
+        'file_mail_title',
+        'comment_mail_template',
+        'comment_mail_title',
+        'message_mail_template',
+        'message_mail_title',
+        'tip_expiration_mail_template',
+        'tip_expiration_mail_title',
+        'receiver_notification_limit_reached_mail_template',
+        'receiver_notification_limit_reached_mail_title',
+        'identity_access_authorized_mail_template',
+        'identity_access_authorized_mail_title',
+        'identity_access_denied_mail_template',
+        'identity_access_denied_mail_title',
+        'identity_access_request_mail_template',
+        'identity_access_request_mail_title',
+        'identity_provided_mail_template',
+        'identity_provided_mail_title',
+        'export_template',
+        'export_message_whistleblower',
+        'export_message_recipient'
+    ]
+
+    int_keys = [
+        'port',
+        'tip_expiration_threshold',
+        'notification_threshold_per_hour',
+        'notification_suspension_time',
+    ]
+
+    bool_keys = [
+        'disable_admin_notification_emails',
+        'disable_receiver_notification_emails',
+        'send_email_for_every_event'
+    ]
+
+
+class Mail(Model):
+    """
+    This model keeps track of emails to be spooled by the system
+    """
+    creation_date = DateTime(default_factory=datetime_now)
+
+    address = Unicode()
+    subject = Unicode()
+    body = Unicode()
+
+    processing_attempts = Int(default=0)
+
+    unicode_keys = ['address', 'subject', 'body']
 
 
 class Receiver(Model):
     """
-    name, description, password and notification_fields, can be changed
-    by Receiver itself
+    This model keeps track of receivers settings.
     """
-    user_id = Unicode()
-    # Receiver.user = Reference(Receiver.user_id, User.id)
-
-    name = Unicode(validator=shorttext_v)
-
-    # localization string
-    description = JSON()
-
-    configuration = Unicode()
-
-    # of GPG key fields
-    gpg_key_info = Unicode()
-    gpg_key_fingerprint = Unicode()
-    gpg_key_status = Unicode()
-    gpg_key_armor = Unicode()
-    gpg_enable_notification = Bool()
-
-    # Can be changed and can be different from username!
-    mail_address = Unicode()
+    configuration = Unicode(default=u'default')
+    # configurations: 'default', 'forcefully_selected', 'unselectable'
 
     # Admin chosen options
-    can_delete_submission = Bool()
-    postpone_superpower = Bool()
+    can_delete_submission = Bool(default=False)
+    can_postpone_expiration = Bool(default=False)
+    can_grant_permissions = Bool(default=False)
 
-    last_update = DateTime()
+    tip_notification = Bool(default=True)
 
-    # personal advanced settings
-    tip_notification = Bool()
-    comment_notification = Bool()
-    file_notification = Bool()
-    message_notification = Bool()
+    presentation_order = Int(default=0)
 
-    # contexts = ReferenceSet("Context.id",
-    #                         "ReceiverContext.context_id",
-    #                         "ReceiverContext.receiver_id",
-    #                         "Receiver.id")
+    unicode_keys = ['configuration']
 
-    presentation_order = Int()
-
-    _configuration = [u'default', u'hidden', u'unselectable']
-    _gpg_types = [u'Disabled', u'Enabled']
-
-    unicode_keys = ['name', 'mail_address', 'configuration']
-    localized_strings = ['description']
     int_keys = ['presentation_order']
-    bool_keys = ['can_delete_submission', 'tip_notification',
-                 'comment_notification', 'file_notification',
-                 'message_notification', 'postpone_superpower']
+
+    bool_keys = [
+        'can_delete_submission',
+        'can_postpone_expiration',
+        'can_grant_permissions',
+        'tip_notification',
+    ]
 
 
 class Field(Model):
-    label = JSON()
-    description = JSON()
-    hint = JSON()
+    x = Int(default=0)
+    y = Int(default=0)
+    width = Int(default = 0)
 
-    multi_entry = Bool()
-    required = Bool()
-    preview = Bool()
+    key = Unicode(default=u'')
+
+    label = JSON(validator=longlocal_v)
+    description = JSON(validator=longlocal_v)
+    hint = JSON(validator=longlocal_v)
+
+    required = Bool(default=False)
+    preview = Bool(default=False)
+
+    multi_entry = Bool(default=False)
+    multi_entry_hint = JSON(validator=shortlocal_v)
 
     # This is set if the field should be duplicated for collecting statistics
     # when encryption is enabled.
-    stats_enabled = Bool()
+    stats_enabled = Bool(default=False)
 
-    # This indicates that this field should be used as a template for composing
-    # new steps.
-    is_template = Bool()
+    triggered_by_score = Int(default=0)
 
-    x = Int()
-    y = Int()
+    fieldgroup_id = Unicode()
+    step_id = Unicode()
+    template_id = Unicode()
 
+    type = Unicode(default=u'inputbox')
+
+    instance = Unicode(default=u'instance')
+    editable = Bool(default=True)
+
+    unicode_keys = ['type', 'instance', 'key']
+    int_keys = ['x', 'y', 'width', 'triggered_by_score']
+    localized_keys = ['label', 'description', 'hint', 'multi_entry_hint']
+    bool_keys = ['editable', 'multi_entry', 'preview', 'required', 'stats_enabled']
+
+
+class FieldAttr(Model):
+    field_id = Unicode()
+    name = Unicode()
     type = Unicode()
-    # Supported field types:
-    # * inputbox
-    # * textarea
-    # * selectbox
-    # * checkbox
-    # * modal
-    # * dialog
-    # * tos
-    # * fieldgroup
+    value = JSON()
 
-    # When only 1 option
-    # {
-    #     "trigger": field_id
-    # }
+    # FieldAttr is a special model.
+    # Here we consider all its attributes as unicode, then
+    # depending on the type we handle the value as a localized value
+    unicode_keys = ['field_id', 'name', 'type', 'value']
 
-    # When multiple options
-    # [
-    #     {
-    #         "name": lang_dict,
-    #         "x": int,
-    #         "y": int,
-    #         "description": lang_dict,
-    #         "trigger": field_id
-    #     }, ...
-    # ]
+    def update(self, values=None):
+        """
+        Updated Models attributes from dict.
+        """
+        # May raise ValueError and AttributeError
+        if values is None:
+            return
 
-    unicode_keys = ['type']
-    int_keys = ['x', 'y']
-    localized_strings = ['label', 'description', 'hint']
-    bool_keys = ['multi_entry', 'preview', 'required', 'stats_enabled', 'is_template']
+        setattr(self, 'field_id', unicode(values['field_id']))
+        setattr(self, 'name', unicode(values['name']))
+        setattr(self, 'type', unicode(values['type']))
 
-    # XXX the instance already knows about the store, are we sure there's no way
-    # to obtain it?
-    def delete(self, store):
-        for child in self.children:
-            child.delete(store)
-        store.remove(self)
+        if self.type == 'localized':
+            value = values['value']
+            previous = getattr(self, 'value')
 
-    def copy(self, store, is_template):
-        obj_copy = self.__class__()
-        obj_copy.label = copy.deepcopy(self.label)
-        obj_copy.description = copy.deepcopy(self.label)
-        obj_copy.hint = copy.deepcopy(self.label)
-        obj_copy.multi_entry = self.multi_entry
-        obj_copy.required = self.required
-        obj_copy.stats_enabled = self.stats_enabled
-        obj_copy.is_template = is_template
-        obj_copy.x = self.x
-        obj_copy.y = self.y
-        obj_copy.type = self.type
-        for child in self.children:
-            child_copy = child.copy(store, is_template)
-            obj_copy.children.add(child_copy)
-        for opt in self.options:
-            opt_copy = opt.copy(store)
-            obj_copy.options.add(opt_copy)
-        store.add(obj_copy)
-        return obj_copy
+            if previous and isinstance(previous, dict):
+                previous.update(value)
+                setattr(self, 'value', previous)
+            else:
+                setattr(self, 'value', value)
+        else:
+            setattr(self, 'value', unicode(values['value']))
+
 
 class FieldOption(Model):
     field_id = Unicode()
-    number = Int()
-    attrs = JSON()
+    presentation_order = Int(default=0)
+    label = JSON()
+    score_points = Int(default=0)
+    trigger_field = Unicode()
+    trigger_step = Unicode()
 
     unicode_keys = ['field_id']
+    int_keys = ['presentation_order', 'score_points']
+    localized_keys = ['label']
+
+
+class FieldAnswer(Model):
+    internaltip_id = Unicode()
+    fieldanswergroup_id = Unicode()
+    key = Unicode(default=u'')
+    is_leaf = Bool(default=True)
+    value = Unicode(default=u'')
+
+    unicode_keys = ['internaltip_id', 'key', 'value']
+    bool_keys = ['is_leaf']
+
+
+class FieldAnswerGroup(Model):
+    number = Int(default=0)
+    fieldanswer_id = Unicode()
+
+    unicode_keys = ['fieldanswer_id']
     int_keys = ['number']
-    json_keys = ['attrs']
 
-    def __init__(self, attrs=None, localized_keys=[]):
-        self.attrs = dict()
-        self.update(attrs, localized_keys)
-
-    @classmethod
-    def new(cls, store, attrs=None, localized_keys=[]):
-        obj = cls(attrs, localized_keys)
-        store.add(obj)
-        return obj
-
-    def update(self, attrs=None, localized_keys=[]):
-        BaseModel.update(self, attrs)
-
-        for k in localized_keys:
-            value = attrs['attrs'][k]
-            previous = self.attrs.get(k, None)
-            if previous and isinstance(previous, dict):
-                previous.update(value)
-                self.attrs[k] = previous
-            else:
-                self.attrs[k] = value
-
-    def copy(self, store):
-        obj_copy = self.__class__()
-        obj_copy.field_id = self.field_id
-        obj_copy.number = self.number
-        obj_copy.attrs = copy.deepcopy(self.attrs)
-        return obj_copy
 
 class Step(Model):
-    context_id = Unicode()
+    questionnaire_id = Unicode()
     label = JSON()
     description = JSON()
-    hint = JSON()
-    number = Int()
+    presentation_order = Int(default=0)
+    triggered_by_score = Int(default=0)
 
-    unicode_keys = ['context_id']
-    int_keys = ['number']
-    localized_strings = ['label', 'description', 'hint']
+    unicode_keys = ['questionnaire_id']
+    int_keys = ['presentation_order', 'triggered_by_score']
+    localized_keys = ['label', 'description']
+
+
+class Questionnaire(Model):
+    key = Unicode(default=u'')
+    name = Unicode()
+    show_steps_navigation_bar = Bool(default=False)
+    steps_navigation_requires_completion = Bool(default=False)
+    enable_whistleblower_identity = Bool(default=False)
+
+    editable = Bool(default=True)
+
+    unicode_keys = ['name', 'key']
+
+    bool_keys = [
+      'editable',
+      'show_steps_navigation_bar',
+      'steps_navigation_requires_completion'
+    ]
+
+
+class ArchivedSchema(Model):
+    hash = Unicode()
+    type = Unicode()
+    schema = JSON()
+
+    unicode_keys = ['hash']
+
+
+class Stats(Model):
+    start = DateTime()
+    summary = JSON()
+    free_disk_space = Int()
+
+
+class Anomalies(Model):
+    date = DateTime()
+    alarm = Int()
+    events = JSON()
+
+
+class SecureFileDelete(Model):
+    filepath = Unicode()
 
 
 class ApplicationData(Model):
-    """
-    Exists only one instance of this class, because the ApplicationData
-    had only one big updated blob.
-    """
     version = Int()
-    fields = JSON()
+    default_questionnaire = JSON()
+
+    int_keys = ['version']
+    json_keys = ['default_questionnaire']
 
 
 # Follow classes used for Many to Many references
@@ -775,6 +955,7 @@ class ReceiverContext(BaseModel):
     """
     __storm_table__ = 'receiver_context'
     __storm_primary__ = 'context_id', 'receiver_id'
+
     context_id = Unicode()
     receiver_id = Unicode()
 
@@ -790,96 +971,165 @@ class ReceiverInternalTip(BaseModel):
     internaltip_id = Unicode()
 
 
-class FieldField(BaseModel):
+class Counter(Model):
     """
-    Class used to implement references between Fields and Fields!
-    parent - child relation used to implement fieldgroups
+    Class used to implement unique counters
     """
-    __storm_table__ = 'field_field'
-    __storm_primary__ = 'parent_id', 'child_id'
+    key = Unicode(validator=shorttext_v)
+    counter = Int(default=1)
+    update_date = DateTime(default_factory=datetime_now)
 
-    parent_id = Unicode()
-    child_id = Unicode()
-
-    unicode_keys = ['parent_id', 'child_id']
-
-
-class Stats(Model):
-    start = DateTime()
-    summary = JSON()
-    freemb = Int()
+    unicode_keys = ['key']
+    int_keys = ['number']
 
 
-class Anomalies(Model):
-    stored_when = Unicode() # is a Datetime but string
-    alarm = Int()
-    events = JSON()
-
-
-class StepField(BaseModel):
+class ShortURL(Model):
     """
-    Class used to implement references between Steps and Fields!
+    Class used to implement url shorteners
     """
-    __storm_table__ = 'step_field'
-    __storm_primary__ = 'step_id', 'field_id'
+    shorturl = Unicode(validator=shorturl_v)
+    longurl = Unicode(validator=longurl_v)
 
-    step_id = Unicode()
-    field_id = Unicode()
-
-    unicode_keys = ['step_id', 'field_id']
+    unicode_keys = ['shorturl', 'longurl']
 
 
-Field.options = ReferenceSet(Field.id,
-                             FieldOption.field_id)
+class File(Model):
+    """
+    Class used for storing PNG pictures of context/users
+    """
+    data = Unicode()
 
-FieldOption.field = Reference(FieldOption.field_id, Field.id)
 
-Context.steps = ReferenceSet(Context.id,
-                             Step.context_id)
+Node.logo = Reference(Node.logo_id, File.id)
+Node.css = Reference(Node.css_id, File.id)
+Context.picture = Reference(Context.img_id, File.id)
+User.picture = Reference(User.img_id, File.id)
 
-Step.context = Reference(Step.context_id, Context.id)
 
-# _*_# References tracking below #_*_#
-Receiver.user = Reference(Receiver.user_id, User.id)
+Field.fieldgroup = Reference(Field.fieldgroup_id, Field.id)
+Field.step = Reference(Field.step_id, Step.id)
+Field.template = Reference(Field.template_id, Field.id)
 
-Receiver.internaltips = ReferenceSet(Receiver.id,
-                                     ReceiverInternalTip.receiver_id,
-                                     ReceiverInternalTip.internaltip_id,
-                                     InternalTip.id)
+Field.options = ReferenceSet(
+    Field.id,
+    FieldOption.field_id
+)
 
-InternalTip.receivers = ReferenceSet(InternalTip.id,
-                                     ReceiverInternalTip.internaltip_id,
-                                     ReceiverInternalTip.receiver_id,
-                                     Receiver.id)
+Field.children = ReferenceSet(
+    Field.id,
+    Field.fieldgroup_id
+)
 
-InternalTip.context = Reference(InternalTip.context_id,
-                                Context.id)
+Field.attrs = ReferenceSet(Field.id, FieldAttr.field_id)
 
-InternalTip.comments = ReferenceSet(InternalTip.id,
-                                    Comment.internaltip_id)
+Field.triggered_by_options = ReferenceSet(Field.id, FieldOption.trigger_field)
+Step.triggered_by_options = ReferenceSet(Step.id, FieldOption.trigger_step)
 
-InternalTip.receivertips = ReferenceSet(InternalTip.id,
-                                        ReceiverTip.internaltip_id)
+FieldAnswer.groups = ReferenceSet(FieldAnswer.id, FieldAnswerGroup.fieldanswer_id)
 
-InternalTip.internalfiles = ReferenceSet(InternalTip.id,
-                                         InternalFile.internaltip_id)
+FieldAnswerGroup.fieldanswers = ReferenceSet(
+    FieldAnswerGroup.id,
+    FieldAnswer.fieldanswergroup_id
+)
 
-ReceiverFile.internalfile = Reference(ReceiverFile.internalfile_id,
-                                      InternalFile.id)
+Receiver.internaltips = ReferenceSet(
+    Receiver.id,
+    ReceiverInternalTip.receiver_id,
+    ReceiverInternalTip.internaltip_id,
+    InternalTip.id
+)
 
-ReceiverFile.receiver = Reference(ReceiverFile.receiver_id, Receiver.id)
+Step.children = ReferenceSet(
+    Step.id,
+    Field.step_id
+)
 
-ReceiverFile.internaltip = Reference(ReceiverFile.internaltip_id,
-                                     InternalTip.id)
+Context.questionnaire = Reference(Context.questionnaire_id, Questionnaire.id)
 
-ReceiverFile.receiver_tip = Reference(ReceiverFile.receiver_tip_id,
-                                      ReceiverTip.id)
+Questionnaire.steps = ReferenceSet(Questionnaire.id, Step.questionnaire_id)
 
-WhistleblowerTip.internaltip = Reference(WhistleblowerTip.internaltip_id,
-                                         InternalTip.id)
+Step.questionnaire = Reference(Step.questionnaire_id, Questionnaire.id)
 
-InternalFile.internaltip = Reference(InternalFile.internaltip_id,
-                                     InternalTip.id)
+Receiver.user = Reference(Receiver.id, User.id)
+
+Receiver.internaltips = ReferenceSet(
+    Receiver.id,
+    ReceiverInternalTip.receiver_id,
+    ReceiverInternalTip.internaltip_id,
+    InternalTip.id
+)
+
+InternalTip.receivers = ReferenceSet(
+    InternalTip.id,
+    ReceiverInternalTip.internaltip_id,
+    ReceiverInternalTip.receiver_id,
+    Receiver.id
+)
+
+InternalTip.context = Reference(
+    InternalTip.context_id,
+    Context.id
+)
+
+InternalTip.answers = ReferenceSet(
+    InternalTip.id,
+    FieldAnswer.internaltip_id
+)
+
+InternalTip.comments = ReferenceSet(
+    InternalTip.id,
+    Comment.internaltip_id
+)
+
+InternalTip.receivertips = ReferenceSet(
+    InternalTip.id,
+    ReceiverTip.internaltip_id
+)
+
+ReceiverTip.messages = ReferenceSet(
+    ReceiverTip.id,
+    Message.receivertip_id
+)
+
+ReceiverTip.identityaccessrequests = ReferenceSet(
+    ReceiverTip.id,
+    IdentityAccessRequest.receivertip_id
+)
+
+InternalTip.internalfiles = ReferenceSet(
+    InternalTip.id,
+    InternalFile.internaltip_id
+)
+
+ReceiverFile.internalfile = Reference(
+    ReceiverFile.internalfile_id,
+    InternalFile.id
+)
+
+ReceiverFile.receiver = Reference(
+    ReceiverFile.receiver_id,
+    Receiver.id
+)
+
+ReceiverFile.internaltip = Reference(
+    ReceiverFile.internaltip_id,
+    InternalTip.id
+)
+
+ReceiverFile.receivertip = Reference(
+    ReceiverFile.receivertip_id,
+    ReceiverTip.id
+)
+
+WhistleblowerTip.internaltip = Reference(
+    WhistleblowerTip.internaltip_id,
+    InternalTip.id
+)
+
+InternalFile.internaltip = Reference(
+    InternalFile.internaltip_id,
+    InternalTip.id
+)
 
 ReceiverTip.internaltip = Reference(ReceiverTip.internaltip_id, InternalTip.id)
 
@@ -891,31 +1141,42 @@ Comment.internaltip = Reference(Comment.internaltip_id, InternalTip.id)
 
 Message.receivertip = Reference(Message.receivertip_id, ReceiverTip.id)
 
-Field.children = ReferenceSet(
-    Field.id,
-    FieldField.parent_id,
-    FieldField.child_id,
-    Field.id)
+IdentityAccessRequest.receivertip = Reference(
+    IdentityAccessRequest.receivertip_id,
+    ReceiverTip.id
+)
 
-Step.children = ReferenceSet(
-    Step.id,
-    StepField.step_id,
-    StepField.field_id,
-    Field.id)
+IdentityAccessRequest.reply_user = Reference(
+    IdentityAccessRequest.reply_user_id,
+    User.id
+)
 
 Context.receivers = ReferenceSet(
     Context.id,
     ReceiverContext.context_id,
     ReceiverContext.receiver_id,
-    Receiver.id)
+    Receiver.id
+)
 
 Receiver.contexts = ReferenceSet(
     Receiver.id,
     ReceiverContext.receiver_id,
     ReceiverContext.context_id,
-    Context.id)
+    Context.id
+)
 
-models = [Node, User, Context, ReceiverTip, WhistleblowerTip, Comment,
-          InternalTip, Receiver, ReceiverContext, InternalFile, ReceiverFile,
-          Notification, Message, Field, FieldField, Step,
-          Stats, Anomalies, ApplicationData]
+model_list = [
+    Node,
+    User, Receiver,
+    Context, ReceiverContext,
+    Questionnaire, Step, Field, FieldOption, FieldAttr,
+    FieldAnswer, FieldAnswerGroup,
+    InternalTip, ReceiverTip, WhistleblowerTip,
+    Comment, Message,
+    InternalFile, ReceiverFile,
+    Notification, Mail,
+    Stats, Anomalies,
+    SecureFileDelete,
+    IdentityAccessRequest,
+    ArchivedSchema, ApplicationData
+]

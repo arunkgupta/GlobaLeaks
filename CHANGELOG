@@ -1,3 +1,694 @@
+Changes in version 2.61.3 - 2016-04-13
+    Fix regression on Context/Users deletion (#1633)
+    Fix issues: #1637, #1639
+    o Add Chinese (Taiwan) translation (67%)
+    o Remove Catalan support fallen below 50% :(
+
+    The following is the comprehensive list of closed tickets:
+    o https://github.com/globaleaks/GlobaLeaks/issues/1633
+    o https://github.com/globaleaks/GlobaLeaks/issues/1637
+    o https://github.com/globaleaks/GlobaLeaks/issues/1639
+    o https://github.com/globaleaks/GlobaLeaks/issues/1467
+
+Changes in version 2.61.2 - 2016-04-09
+    o Fix loading of custom css
+
+Changes in version 2.61.1 - 2016-04-09
+    o Fix ulimit setting in init script
+
+Changes in version 2.61.0 - 2016-04-09
+    o Implement haveged as an additional source of entropy
+    o Implement password meters through the zxcvbn library
+    o Implement an export tip button on the tip list page
+    o Implement HTTP Basic Authentication support to limit 
+      platform access during development
+    o Implement a client side test for SMTP configuration
+    o Implement List visualization for contexts
+    o Implement Card visualization for contexts
+    o Serve Context and Receivers images through the REST API
+      reducing time and overhead loading external images
+    o Implement experimental mlock capability in order to prevent the
+      GL process from swapping RAM to disk
+    o Implement support for limiting date questions with min and max 
+      date options
+    o Implement support for recipients selectively opting in or 
+      opting out of submission notifications
+    o Implement eslint in the continuous integration lifecycle
+    o Refine RTL by using the bootstrap-inline-rtl library
+    o Serve CSS and fonts via the /node REST API in order to
+      reduce load time and address #1601
+
+    The following is the comprehensive list of closed tickets:
+    o https://github.com/globaleaks/GlobaLeaks/issues/1076
+    o https://github.com/globaleaks/GlobaLeaks/issues/1303
+    o https://github.com/globaleaks/GlobaLeaks/issues/1577
+    o https://github.com/globaleaks/GlobaLeaks/issues/1580
+    o https://github.com/globaleaks/GlobaLeaks/issues/1584
+    o https://github.com/globaleaks/GlobaLeaks/issues/1589
+    o https://github.com/globaleaks/GlobaLeaks/issues/1593
+    o https://github.com/globaleaks/GlobaLeaks/issues/1596
+    o https://github.com/globaleaks/GlobaLeaks/issues/1601
+    o https://github.com/globaleaks/GlobaLeaks/issues/1606
+    o https://github.com/globaleaks/GlobaLeaks/issues/1612
+    o https://github.com/globaleaks/GlobaLeaks/issues/1615
+    o https://github.com/globaleaks/GlobaLeaks/issues/1619
+    o https://github.com/globaleaks/GlobaLeaks/issues/1021
+    o https://github.com/globaleaks/GlobaLeaks/issues/1588
+    o https://github.com/globaleaks/GlobaLeaks/issues/1610
+    o https://github.com/globaleaks/GlobaLeaks/issues/1613
+    o https://github.com/globaleaks/GlobaLeaks/issues/1621
+    o https://github.com/globaleaks/GlobaLeaks/issues/1623
+
+Changes in version 2.60.144 - 2016-03-14
+    o Fix regression on private messages
+    o Fix visualization of the loader
+    o Improve unit-testing of PGP scenario
+    o Update translations
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1584
+    - https://github.com/globaleaks/GlobaLeaks/issues/1578
+
+Changes in version 2.60.143 - 2016-02-27
+    o Solve recursion issue on field templates
+
+Changes in version 2.60.142 - 2016-02-26
+    o Remove migration support for db versions < 15
+    o Minor UI fixes
+
+Changes in version 2.60.141 - 2016-02-26
+    o Fix regression in proof of work present since 2.60.136 and affecting IE
+    o Minor UI fixes
+
+Changes in version 2.60.140 - 2016-02-24
+    o Fix serialization of files in submission export
+    o Minor UI fixes
+
+Changes in version 2.60.139 - 2016-02-23
+    o Implement autofocus on unfilled mandatory questions
+    o Make possible configure questionnaires out of contexts and reuse them
+    o Enable autovacuum support for sqlite
+    o Prevent leakage of server timezone in zipfiles
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1574
+    - https://github.com/globaleaks/GlobaLeaks/issues/1467
+
+Changes in version 2.60.138 - 2016-02-17
+    o Minor UI fixes
+    o Add possibility to disable submission steps navigation bar
+    o Enable score feature on checkboxes
+    o Add autocomplete==off to relevant inputboxes
+
+Changes in version 2.60.137 - 2016-02-15
+    o Improve startup messaging
+    o Wait migration script to complete before going to background
+
+Changes in version 2.60.136 - 2016-02-14
+    o Implement experimental score feature on selectbox and checkboxes
+    o Implement experimental contitional questions/steps feature
+    o Implement autologin controller for embedded receipts use case
+    o Rewrite debian packaging of apparmor script
+
+Changes in version 2.60.135 - 2016-02-04
+    o Fix syntax error in apparmor script
+
+Changes in version 2.60.134 - 2016-02-04
+    o Adopt CodeClimate for monitoring of code quality
+    o Improve packaging including libraries version following #1515
+    o Hide experimental features behind a advanced configuration enabler
+    o Implement basic submission export by means of a zip file including
+      questionnaire anwsers, eventual messages and files.
+    o Update all javascript dependencies to latest stables
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1556
+    - https://github.com/globaleaks/GlobaLeaks/issues/1557
+    - https://github.com/globaleaks/GlobaLeaks/issues/1508
+    - https://github.com/globaleaks/GlobaLeaks/issues/1560
+    - https://github.com/globaleaks/GlobaLeaks/issues/1468
+
+Changes in version 2.60.133 - 2016-01-14
+    o UI fixes
+
+Changes in version 2.60.132 - 2016-01-13
+    o UI fixes
+
+Changes in version 2.60.131 - 2016-01-10
+    o Packaging fixes
+
+Changes in version 2.60.130 - 2015-01-06
+    o Minor bugfixing
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1549
+
+Changes in version 2.60.129 - 2015-12-26
+    o UI Fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1544
+    - https://github.com/globaleaks/GlobaLeaks/issues/1545
+
+Changes in version 2.60.128 - 2015-12-24
+    o UI Fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1469
+    - https://github.com/globaleaks/GlobaLeaks/issues/1539
+    - https://github.com/globaleaks/GlobaLeaks/issues/1540
+    - https://github.com/globaleaks/GlobaLeaks/issues/1543
+
+commit 8b33bfa813d5b0f15e90701b88432f8eed8fecf4
+Author: evilaliv3 <giovanni.pellerano@evilaliv3.org>
+Date:   Wed Dec 23 22:25:51 2015 +0100
+
+    Address issue #1540
+
+commit 3d8524bc5170d5c75e021a11e6b4a139a46474e1
+Author: evilaliv3 <giovanni.pellerano@evilaliv3.org>
+Date:   Wed Dec 23 22:05:41 2015 +0100
+
+    Reimplement pending request animation addressing issue #1539
+
+commit ad5fb2aa74a41d49ab11d433319d723287fdad0b
+Author: evilaliv3 <giovanni.pellerano@evilaliv3.org>
+Date:   Tue Dec 22 15:24:26 2015 +0100
+
+    Simplify requirements checking and remove --upgrade from pip install command
+
+commit 6c8576fe3ca73efe2398e8d58b1ca1b17340339b
+Author: evilaliv3 <giovanni.pellerano@evilaliv3.org>
+Date:   Tue Dec 22 01:58:14 2015 +0100
+
+    Implement issue #1469
+
+Changes in version 2.60.127 - 2015-12-21
+    o Fix file upload regression
+
+Changes in version 2.60.126 - 2015-12-21
+    o Minor backend fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1537
+
+Changes in version 2.60.125 - 2015-12-21
+    o UI Fixes
+    o Refactor mail templating system and notification scheduler
+    o Implement Short URL feature (#1527)
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1527
+    - https://github.com/globaleaks/GlobaLeaks/issues/1263
+    - https://github.com/globaleaks/GlobaLeaks/issues/1534
+    - https://github.com/globaleaks/GlobaLeaks/issues/1536
+
+Changes in version 2.60.124 - 2015-12-14
+    o UI Fixes
+    o Packaging fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1530
+
+Changes in version 2.60.123 - 2015-12-11
+    o UI Fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1524
+    - https://github.com/globaleaks/GlobaLeaks/issues/1526
+
+Changes in version 2.60.122 - 2015-12-10
+    o Migration fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1525
+
+Changes in version 2.60.121 - 2015-12-09
+    o Packaging fixes
+    o UI Fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1506
+    - https://github.com/globaleaks/GlobaLeaks/issues/1521
+    - https://github.com/globaleaks/GlobaLeaks/issues/1523
+    - https://github.com/globaleaks/GlobaLeaks/issues/1514
+
+Changes in version 2.60.120 - 2015-12-03
+    o UI Fixes
+    o Migration fixes
+
+Changes in version 2.60.119 - 2015-11-30
+    o UI Fixes
+
+Changes in version 2.60.118 - 2015-11-27
+    o UI Fixes
+    o Update translations
+
+Changes in version 2.60.117 - 2015-11-25
+    o UI Fixes
+    o Update translations
+
+Changes in version 2.60.116 - 2015-11-24
+    o Packaging fixes
+    o Update translations
+
+Changes in version 2.60.115 - 2015-11-22
+    o Packaging fixes
+
+Changes in version 2.60.114 - 2015-11-21
+    o Implement Proof of Work based on the HashCash to improve protection from spam attacks
+    o Implement secure wiping of files upon deletion
+    o Integrate OpenPGP.js library
+    o Integrate the scrypt-async library
+    o Add possibility for admins to configure their PGP key for mail notifications
+    o Add possibility for configuring the title of the main application pages
+    o Split admin/user/custodian authentication from whistleblower authentication handler
+    o Add possibility for enabling the whistleblower to comment/message/file upload on a later stage of the submission
+    o Implement custodian of the whistleblower identities user
+    o Modularize currently implemente admin API handlers
+    o Implement hidden contexts and hidden submission urls
+    o Improve fields validators and their UI
+    o Improve detection of jobs malfunctions by monitoring their timing
+    o Improve detection of client malfunction by implementing secure exception notification to the backend with encrypted notifications for administrators
+    o Bugfix support for IE10
+    o Improve resiliency of migration script
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/799
+    - https://github.com/globaleaks/GlobaLeaks/issues/688
+    - https://github.com/globaleaks/GlobaLeaks/issues/1387
+    - https://github.com/globaleaks/GlobaLeaks/issues/908
+    - https://github.com/globaleaks/GlobaLeaks/issues/1399
+    - https://github.com/globaleaks/GlobaLeaks/issues/1432
+    - https://github.com/globaleaks/GlobaLeaks/issues/185
+    - https://github.com/globaleaks/GlobaLeaks/issues/1450
+    - https://github.com/globaleaks/GlobaLeaks/issues/1449
+    - https://github.com/globaleaks/GlobaLeaks/issues/1457
+    - https://github.com/globaleaks/GlobaLeaks/issues/1410
+    - https://github.com/globaleaks/GlobaLeaks/issues/1458
+    - https://github.com/globaleaks/GlobaLeaks/issues/1459
+    - https://github.com/globaleaks/GlobaLeaks/issues/1438
+    - https://github.com/globaleaks/GlobaLeaks/issues/678
+    - https://github.com/globaleaks/GlobaLeaks/issues/1462
+    - https://github.com/globaleaks/GlobaLeaks/issues/1463
+    - https://github.com/globaleaks/GlobaLeaks/issues/1464
+    - https://github.com/globaleaks/GlobaLeaks/issues/1191
+    - https://github.com/globaleaks/GlobaLeaks/issues/1402
+    - https://github.com/globaleaks/GlobaLeaks/issues/1456
+    - https://github.com/globaleaks/GlobaLeaks/issues/1438
+    - https://github.com/globaleaks/GlobaLeaks/issues/1466
+    - https://github.com/globaleaks/GlobaLeaks/issues/1340
+    - https://github.com/globaleaks/GlobaLeaks/issues/1044
+    - https://github.com/globaleaks/GlobaLeaks/issues/1156
+    - https://github.com/globaleaks/GlobaLeaks/issues/1158
+    - https://github.com/globaleaks/GlobaLeaks/issues/1215
+    - https://github.com/globaleaks/GlobaLeaks/issues/1463
+    - https://github.com/globaleaks/GlobaLeaks/issues/1341
+    - https://github.com/globaleaks/GlobaLeaks/issues/1461
+    - https://github.com/globaleaks/GlobaLeaks/issues/1483
+    - https://github.com/globaleaks/GlobaLeaks/issues/1478
+    - https://github.com/globaleaks/GlobaLeaks/issues/1480
+    - https://github.com/globaleaks/GlobaLeaks/issues/1487
+    - https://github.com/globaleaks/GlobaLeaks/issues/1488
+
+Changes in version 2.60.113 - 2015-10-22
+    o Minor UI fixes
+    o Packaging fixes
+
+Changes in version 2.60.112 - 2015-09-26
+    o Improve unit testing
+
+Changes in version 2.60.111 - 2015-09-26
+    o Improve unit testing
+
+Changes in version 2.60.110 - 2015-09-19
+    o Improve unit testing
+    o Update translations
+
+Changes in version 2.60.109 - 2015-09-16
+    o Minor bugfixing of UI and migration scripts
+
+Changes in version 2.60.108 - 2015-09-07
+    o Minor UI fixes
+
+Changes in version 2.60.107 - 2015-09-07
+    o Minor backend fixes
+    o Minor UI fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1415
+    - https://github.com/globaleaks/GlobaLeaks/issues/1417
+    - https://github.com/globaleaks/GlobaLeaks/issues/1156
+    - https://github.com/globaleaks/GlobaLeaks/issues/1158
+    - https://github.com/globaleaks/GlobaLeaks/issues/1156
+    - https://github.com/globaleaks/GlobaLeaks/issues/1406
+    - https://github.com/globaleaks/GlobaLeaks/issues/1412
+
+Changes in version 2.60.106 - 2015-09-06
+    o Minor backend fixes
+    o Minor UI fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1383
+    - https://github.com/globaleaks/GlobaLeaks/issues/1386
+    - https://github.com/globaleaks/GlobaLeaks/issues/1351
+    - https://github.com/globaleaks/GlobaLeaks/issues/1391
+    - https://github.com/globaleaks/GlobaLeaks/issues/1400
+
+Changes in version 2.60.105 - 2015-08-28
+    o DB migration fixes
+    o Minor UI fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1374
+    - https://github.com/globaleaks/GlobaLeaks/issues/1375
+
+Changes in version 2.60.104 - 2015-08-27
+    o Minor UI fixes
+
+Changes in version 2.60.103 - 2015-08-26
+    o Minor UI fixes
+    o Minor backend fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1366
+
+Changes in version 2.60.102 - 2015-08-24
+    o Minor UI fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1355
+
+Changes in version 2.60.101 - 2015-08-24
+    o Minor UI fixes
+    o Improve error resiliency of file management with a retry mechanism
+    o Add monitoring of Jobs time
+    o Add monitoring of Handlers time
+    o Add clientside exception notification
+    o Implement multi entry fields
+    o Implement horizontal fields ordering
+    o Archive questionnaire datastructure on submit
+    o Serialize questionnaire answers in structured relationl DB in order
+      to allow search and statistics
+
+Changes in version 2.60.100 - 2015-08-13
+    o Minor UI fixes
+
+Changes in version 2.60.99 - 2015-08-04
+    o Minor backend fixes
+
+Changes in version 2.60.98 - 2015-08-03
+    o Minor UI fixes
+
+Changes in version 2.60.97 - 2015-08-03
+    o Improved Tip Page UI
+    o Improved File Uploader UI
+    o Minor UI fixes to submission interface
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1346
+    - https://github.com/globaleaks/GlobaLeaks/issues/1347
+    - https://github.com/globaleaks/GlobaLeaks/issues/1348
+    - https://github.com/globaleaks/GlobaLeaks/issues/1349
+    - https://github.com/globaleaks/GlobaLeaks/issues/923
+    - https://github.com/globaleaks/GlobaLeaks/issues/1233
+    - https://github.com/globaleaks/GlobaLeaks/issues/1332
+    - https://github.com/globaleaks/GlobaLeaks/issues/1350
+
+Changes in version 2.60.96 - 2015-07-30
+    o Minor UI fixes
+
+Changes in version 2.60.95 - 2015-07-30
+    o Minor UI fixes
+
+Changes in version 2.60.94 - 2015-07-28
+    o Minor UI fixes
+
+Changes in version 2.60.93 - 2015-07-28
+    o Minor UI fixes
+
+Changes in version 2.60.92 - 2015-07-28
+    o Minor UI fixes
+
+Changes in version 2.60.91 - 2015-07-18
+    o Minor UI fixes
+
+Changes in version 2.60.90 - 2015-07-17
+    o Minor UI fixes
+
+Changes in version 2.60.89 - 2015-07-15
+    o Minor UI fixes
+
+Changes in version 2.60.88 - 2015-07-15
+    o Minor backend fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1327
+    - https://github.com/globaleaks/GlobaLeaks/issues/1330
+
+Changes in version 2.60.87 - 2015-07-07
+    o Minor UI fixes
+
+Changes in version 2.60.86 - 2015-07-07
+    o Minor UI fixes
+
+Changes in version 2.60.85 - 2015-07-05
+    o Packaging fixes
+
+Changes in version 2.60.84 - 2015-07-05
+    o Fix Apparmor script adding missing allowed paths
+    o Improve UX of Tip page and Tip List page
+    o Remove JQuery dependency app size of ~10%
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1267
+
+Changes in version 2.60.83 - 2015-06-28
+    o Fix bug in file uploader due to parallel chunks
+    o Revise Anti Disk Flood checks
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1310
+    - https://github.com/globaleaks/GlobaLeaks/issues/1313
+    - https://github.com/globaleaks/GlobaLeaks/issues/1316
+
+Changes in version 2.60.82 - 2015-06-22
+    o Improved UX for file uploads
+    o Misc UI fixes
+    o Update Translations
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1224
+    - https://github.com/globaleaks/GlobaLeaks/issues/1257
+    - https://github.com/globaleaks/GlobaLeaks/issues/1295
+    - https://github.com/globaleaks/GlobaLeaks/issues/1300
+    - https://github.com/globaleaks/GlobaLeaks/issues/1302
+    - https://github.com/globaleaks/GlobaLeaks/issues/1305
+    - https://github.com/globaleaks/GlobaLeaks/issues/1299
+
+Changes in version 2.60.81 - 2015-06-14
+    o Misc UI fixes
+    o Update Translations
+
+Changes in version 2.60.80 - 2015-06-14
+    o Misc UI fixes
+
+Changes in version 2.60.79 - 2015-06-14
+    o Misc UI fixes
+    o Update Translations
+
+Changes in version 2.60.78 - 2015-06-14
+    o Internationalization fixes
+
+Changes in version 2.60.77 - 2015-06-13
+    o Bump of AngulaJS to 1.3.16
+    o Important performance improval of tiplist page
+    o General UI improval thanks to angular one-time-binding
+    o Improve anti-flood protections and implement anomaly notifications
+    o Implement simplified templating system
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/798
+    - https://github.com/globaleaks/GlobaLeaks/issues/934
+    - https://github.com/globaleaks/GlobaLeaks/issues/796
+    - https://github.com/globaleaks/GlobaLeaks/issues/297
+    - https://github.com/globaleaks/GlobaLeaks/issues/1228
+    - https://github.com/globaleaks/GlobaLeaks/issues/1281
+    - https://github.com/globaleaks/GlobaLeaks/issues/1282
+    - https://github.com/globaleaks/GlobaLeaks/issues/1288
+    - https://github.com/globaleaks/GlobaLeaks/issues/1294
+    - https://github.com/globaleaks/GlobaLeaks/issues/1285
+
+Changes in version 2.60.76 - 2015-06-10
+    o Minor UI fixes
+
+Changes in version 2.60.75 - 2015-06-09
+    o Minor UI fixes
+
+Changes in version 2.60.74 - 2015-05-30
+    o Minor UI fixes
+
+Changes in version 2.60.73 - 2015-05-28
+    o Packageing fixes
+
+Changes in version 2.60.72 - 2015-05-28
+    o Packageing fixes
+
+Changes in version 2.60.71 - 2015-05-27
+    o Minor UI fixes
+
+Changes in version 2.60.70 - 2015-05-25
+    o Packaging fixes
+    o Improved cross-browser compatibility testing by
+      means of Saucelabs integration with Protractor tests
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1278
+    - https://github.com/globaleaks/GlobaLeaks/issues/1130
+    - https://github.com/globaleaks/GlobaLeaks/issues/1274
+    - https://github.com/globaleaks/GlobaLeaks/issues/1273
+    - https://github.com/globaleaks/GlobaLeaks/issues/1173
+    - https://github.com/globaleaks/GlobaLeaks/issues/1262
+    - https://github.com/globaleaks/GlobaLeaks/issues/444
+    - https://github.com/globaleaks/GlobaLeaks/issues/1258
+
+Changes in version 2.60.69 - 2015-05-02
+    o Packaging fixes
+    o RTL fixes
+
+Changes in version 2.60.68 - 2015-04-29
+    o Updated translations
+    o Minor UI fixes
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1241
+    - https://github.com/globaleaks/GlobaLeaks/issues/1235
+    - https://github.com/globaleaks/GlobaLeaks/issues/1250
+    - https://github.com/globaleaks/GlobaLeaks/issues/1248
+    - https://github.com/globaleaks/GlobaLeaks/issues/1251
+    - https://github.com/globaleaks/GlobaLeaks/issues/1252
+    - https://github.com/globaleaks/GlobaLeaks/issues/1253
+
+Changes in version 2.60.67 - 2015-04-21
+    o Updated translations
+    o Minor UI fixes
+
+Changes in version 2.60.66 - 2015-04-15
+    o Updated translations
+    o Minor UI fixes
+
+Changes in version 2.60.65 - 2015-04-10
+    o Updated translations
+    o Packaging fixes
+
+Changes in version 2.60.64 - 2015-04-09
+    o Revision of the entire application texts
+    o Completion of included translations
+    o Add translations for Albanian, Bulgarian, Bosnian,
+      Welsh, Persian, Kurdish, Slovenian, Russian
+    o Improved File Uploader by means of Flow.js
+    o Implement Submission flood protection based on human Captchas
+    o Improve anomaly detection and admin notification
+    o Implement Tips expiration notification for Receivers
+    o Disable SSL in favor of TLS on SMTP notifications
+    o Minor UI Fixes
+    o Apply bulk code and API cleanup
+
+    The following is the comprehensive list of closed tickets:
+    - https://github.com/globaleaks/GlobaLeaks/issues/1182
+    - https://github.com/globaleaks/GlobaLeaks/issues/921
+    - https://github.com/globaleaks/GlobaLeaks/issues/1193
+    - https://github.com/globaleaks/GlobaLeaks/issues/1187
+    - https://github.com/globaleaks/GlobaLeaks/issues/1207
+    - https://github.com/globaleaks/GlobaLeaks/issues/1208
+    - https://github.com/globaleaks/GlobaLeaks/issues/1209
+    - https://github.com/globaleaks/GlobaLeaks/issues/1212
+    - https://github.com/globaleaks/GlobaLeaks/issues/1210
+    - https://github.com/globaleaks/GlobaLeaks/issues/1164
+    - https://github.com/globaleaks/GlobaLeaks/issues/1193
+    - https://github.com/globaleaks/GlobaLeaks/issues/1187
+    - https://github.com/globaleaks/GlobaLeaks/issues/1106
+    - https://github.com/globaleaks/GlobaLeaks/issues/932
+    - https://github.com/globaleaks/GlobaLeaks/issues/1216
+    - https://github.com/globaleaks/GlobaLeaks/issues/1096
+    - https://github.com/globaleaks/GlobaLeaks/issues/1174
+    - https://github.com/globaleaks/GlobaLeaks/issues/1204
+    - https://github.com/globaleaks/GlobaLeaks/issues/547
+    - https://github.com/globaleaks/GlobaLeaks/issues/1197
+    - https://github.com/globaleaks/GlobaLeaks/issues/1095
+
+Changes in version 2.60.63 - 2015-02-20
+    o Add Catalan (100%)
+    o Minor UI fixes
+
+Changes in version 2.60.62 - 2015-02-16
+    o Fix a directory traversal issue introduced in 2.60.54
+    o Minor UI fixes
+
+Changes in version 2.60.61 - 2015-02-12
+    o Minor UI fixes
+
+Changes in version 2.60.60 - 2015-02-10
+    o Minor UI fixes
+
+Changes in version 2.60.59 - 2015-02-10
+    o Implement initial support for embeddably interfaces
+    o Apply fixes for RTL internationalization
+    o Minor UI fixes
+
+Changes in version 2.60.58 - 2015-02-04
+    o Fix validation of keys with no expiration set
+    o Fix alignment of Urdu as RTL language
+    o Improve resiliency of installation script
+
+Changes in version 2.60.57 - 2015-02-03
+    o Migration script fixes
+
+Changes in version 2.60.56 - 2015-02-03
+    o Added PGP expiration checks
+
+Changes in version 2.60.55 - 2015-01-29
+    o Minor UI fixes
+
+Changes in version 2.60.54 - 2015-01-28
+    o Fixed custom CSS flickering
+
+Changes in version 2.60.53 - 2015-01-26
+    o Minor UI fixes
+
+Changes in version 2.60.52 - 2015-01-23
+    o Minor UI fixes
+
+Changes in version 2.60.51 - 2015-01-22
+    o Various migration fixes
+    o Minor UI fixes
+
+Changes in version 2.60.50 - 2015-01-21
+    o Enabled GZIP compression
+    o Minor UI fixes
+
+Changes in version 2.60.49 - 2015-01-18
+    o Implemented file upload preview
+    o Implemented simplified vertical submission template
+    o Various Bugfixing
+
+Changes in version 2.60.48 - 2015-01-13
+    o Various Bugfixing
+
+Changes in version 2.60.47 - 2015-01-12
+    o Addressed Clientside Performance Issues
+    o Added Finnish (75)
+
+Changes in version 2.60.46 - 2015-01-06
+    o Minor Bugfixing
+
+Changes in version 2.60.45 - 2014-12-30
+    o Added Hebrew (95%)
+    o Minor Bugfixing
+
+Changes in version 2.60.44 - 2014-12-25
+    o Packaging Fixes
+
 Changes in version 2.60.43 - 2014-12-22
     o Updated Translations
 
