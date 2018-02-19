@@ -771,6 +771,10 @@ module.exports = function(grunt) {
 
     grunt.file.copy('app/data_src/field_attrs.json', 'app/data/field_attrs.json');
 
+    grunt.file.copy('app/l10n/ca@valencia.json', 'app/l10n/ca_va.json');
+
+    grunt.file.delete('app/l10n/ca@valencia.json');
+
     done();
   });
 
