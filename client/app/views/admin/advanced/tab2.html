@@ -1,27 +1,53 @@
 <div class="row">
   <div class="col-md-12">
-    <div class="form-group">
-      <input data-ng-model="admin.node.tor2web_admin" type="checkbox">
-      <label data-translate>Allow admin access via HTTPS</label>
-    </div>
-    <div class="form-group">
-      <input data-ng-model="admin.node.tor2web_custodian" type="checkbox">
-      <label data-translate>Allow custodian access via HTTPS</label>
-    </div>
-    <div class="form-group">
-      <input data-ng-model="admin.node.tor2web_receiver" type="checkbox">
-      <label data-translate>Allow recipient access via HTTPS</label>
-    </div>
-    <div class="form-group">
-      <input data-ng-model="admin.node.tor2web_whistleblower" type="checkbox">
-      <label data-translate>Allow whistleblower submissions via HTTPS</label>
-      <div data-ng-show="admin.node.tor2web_whistleblower">
-        <span data-translate>This won't preserve whistleblower's anonymity while preserving submission confidentiality.</span>
+    <div data-ng-form="shorturlAddForm" class="form-inline" isolate-form novalidate>
+      <div class="form-group display-block">
+        <label data-translate>Short URL</label>
+	<div class="input-group" data-ng-class="{'has-error': shorturlAddForm.short_url.$invalid}">
+	  <span class="input-group-addon">/u/</span>
+          <input type="text" class="form-control" name="short_url" data-ng-model="new_shorturl.shorturl" data-ng-pattern="shortener_shorturl_regexp">
+        </div>
       </div>
+      <div class="form-group display-block">
+        <label data-translate>Long URL</label>
+	<span data-ng-class="{'has-error': shorturlAddForm.long_url.$invalid}">
+          <input type="text" class="form-control" name="long_url" data-ng-model="new_shorturl.longurl" data-ng-pattern="shortener_longurl_regexp">
+	</span>
+      </div>
+      <button type="submit"
+              class="btn btn-primary"
+              data-ng-disabled="shorturlAddForm.$invalid"
+              data-ng-click="add_shorturl()">
+        <i class="glyphicon glyphicon-plus-sign"></i>
+        <span data-translate>Add</span>
+      </button>
     </div>
-    <div class="form-group">
-      <input data-ng-init="admin.node.tor2web_unauth" data-ng-model="admin.node.tor2web_unauth" type="checkbox">
-      <label data-translate>Allow access to public resources via HTTPS</label>
-    </div>
+  </div>
+</div>
+<br />
+<div class="row">
+  <div class="col-md-12">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="col-md-3" data-translate>Short URL</th>
+          <th class="col-md-9" data-translate>Long URL</th>
+          <th class="col-md-1"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-ng-repeat="shorturl in admin.shorturls | orderBy:'shorturl'" data-ng-controller="AdminShorturlEditCtrl">
+          <td>{{shorturl.shorturl}}</td>
+          <td>{{shorturl.longurl}}</td>
+          <td>
+            <button class="btn btn-xs btn-danger"
+                    data-ng-click="delete_shorturl(shorturl)">
+              <i class="glyphicon glyphicon-trash"></i>
+              <span data-translate>Delete</span>
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>

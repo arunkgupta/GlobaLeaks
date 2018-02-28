@@ -1,78 +1,101 @@
-# -*- encoding: utf-8 -*-
+# -*- coding: utf-8 -*-
 #
-# this file contain the class converting the %KeyWords% with data.
-# perhaps exists something python-stable-portable-well know, this
-# class has just be written down easily and fit our needs.
-#
-# If you know something better, please tell to us. At the moment,
-# supporter KeyWords are here documented:
-# https://github.com/globaleaks/GlobaLeaks/wiki/Customization-guide#customize-notification
-
-import copy
-
+# This filte contains routines dealing with texts templates and variables replacement used
+# mainly in mail notifications.
 import collections
+import copy
+import re
 
+from globaleaks import __version__
 from globaleaks import models
 from globaleaks.rest import errors
-from globaleaks.settings import GLSettings
 from globaleaks.utils.utility import ISO8601_to_pretty_str, ISO8601_to_day_str, \
-    ISO8601_to_datetime, datetime_now, bytes_to_pretty_str
+    bytes_to_pretty_str
+
 
 node_keywords = [
-    '%NodeName%',
-    '%HiddenService%',
-    '%PublicSite%',
+    '{NodeName}',
+    '{DocumentationUrl}',
+    '{TorUrl}',
+    '{TorLoginUrl}',
+    '{HTTPSUrl}',
+    '{HTTPSLoginUrl}',
+    '{AdminCredentials}',
+    '{RecipientCredentials}'
 ]
 
+context_keywords = [
+    '{ContextName}'
+]
+
+user_keywords = [
+    '{RecipientName}'
+]
 
 tip_keywords = [
-    '%TipID%',
-    '%TipTorURL%',
-    '%TipT2WURL%',
-    '%TorURL%',
-    '%T2WURL%',
-    '%TipNum%',
-    '%TipLabel%',
-    '%EventTime%',
-    '%SubmissionDate%',
-    '%ExpirationDate%',
-    '%ExpirationWatch%',
-    '%RecipientName%',
-    '%ContextName%'
+    '{TipID}',
+    '{TipNum}',
+    '{TipLabel}',
+    '{EventTime}',
+    '{SubmissionDate}',
+    '{QuestionnaireAnswers}',
+    '{Comments}',
+    '{Messages}',
+    '{TorUrl}',
+    '{HTTPSUrl}'
 ]
 
 file_keywords = [
-    '%FileName%',
-    '%FileSize%',
-    '%FileType%'
-]
-
-export_template_keywords = [
-    '%QuestionnaireAnswers%',
-    '%Comments%',
-    '%Messages%'
+    '{FileName}',
+    '{FileSize}'
 ]
 
 export_message_keywords = [
-    '%Content%'
+    '{Content}'
+]
+
+expiration_summary_keywords = [
+    '{ExpiringSubmissionCount}',
+    '{EarliestExpirationDate}',
+    '{TorUrl}',
+    '{HTTPSUrl}'
 ]
 
 admin_pgp_alert_keywords = [
-    '%PGPKeyInfoList%'
+    '{PGPKeyInfoList}'
 ]
 
 user_pgp_alert_keywords = [
-    '%PGPKeyInfo%'
+    '{PGPKeyInfo}'
 ]
 
 admin_anomaly_keywords = [
-    '%AnomalyDetailDisk%',
-    '%AnomalyDetailActivities%',
-    '%ActivityAlarmLevel%',
-    '%ActivityDump%',
-    '%NodeName%',
-    '%FreeMemory%',
-    '%TotalMemory%'
+    '{AnomalyDetailDisk}',
+    '{AnomalyDetailActivities}',
+    '{ActivityAlarmLevel}',
+    '{ActivityDump}',
+    '{NodeName}',
+    '{FreeMemory}',
+    '{TotalMemory}'
+]
+
+https_expr_keywords = [
+    '{ExpirationDate}',
+    '{TorUrl}',
+    '{HTTPSUrl}',
+]
+
+software_update_keywords = [
+    '{InstalledVersion}',
+    '{LatestVersion}',
+    '{ChangeLogUrl}',
+    '{UpdateGuideUrl}',
+]
+
+platform_signup_keywords = [
+    '{RecipientName}',
+    '{ActivationUrl}',
+    '{ExpirationDate}'
 ]
 
 
@@ -87,197 +110,152 @@ def indent_text(text, n=1):
     return '\n'.join([('  ' * n if not l.isspace() else '') + l for l in text.splitlines()])
 
 
-def dump_field_entry(output, field, entry, indent_n):
-    field_type = field['type']
-    if field_type == 'checkbox':
-        for k, v in entry.iteritems():
-            for option in field['options']:
-                if k == option.get('id', '') and v == 'True':
-                    output += indent(indent_n) + option['label'] + '\n'
-    elif field_type in ['selectbox', 'multichoice']:
-        for option in field['options']:
-            if entry.get('value', '') == option['id']:
-                output += indent(indent_n) + option['label'] + '\n'
-    elif field_type == 'date':
-        output += indent(indent_n) + ISO8601_to_pretty_str(entry.get('value', '')) + '\n'
-    elif field_type == 'tos':
-        answer = '☑' if entry.get('value', '') == 'True' else '☐'
-        output += indent(indent_n) + answer + '\n'
-    elif field_type == 'fieldgroup':
-        output = dump_fields(output, field['children'], entry, indent_n)
-    else:
-        output += indent_text(entry.get('value', ''), indent_n) + '\n'
-
-    return output + '\n'
-
-
-def dump_fields(output, fields, answers, indent_n):
-    rows = {}
-    for f in fields:
-        y = f['y']
-        if y not in rows:
-            rows[y] = []
-        rows[y].append(f)
-
-    rows = collections.OrderedDict(sorted(rows.items()))
-
-    for r in rows:
-        rows[r] = sorted(rows[r], key=lambda k: k['x'])
-
-    for index_x, row in rows.iteritems():
-        for field in row:
-            if field['type'] != 'fileupload' and field['id'] in answers:
-                output += indent(indent_n) + field['label'] + '\n'
-                entries = answers[field['id']]
-                if len(entries) == 1:
-                    output = dump_field_entry(output, field, entries[0], indent_n + 1)
-                else:
-                    i = 1
-                    for entry in entries:
-                        output += indent(indent_n) + '#' + str(i) + '\n'
-                        output = dump_field_entry(output, field, entry, indent_n + 2)
-                        i += 1
-
-    return output
-
-
-def dump_questionnaire_answers(questionnaire, answers):
-    output = ''
-
-    try:
-        questionnaire = sorted(questionnaire, key=lambda k: k['presentation_order'])
-    except:
-        pass
-
-    for step in questionnaire:
-        output += step['label'] + '\n'
-        output = dump_fields(output, step['children'], answers, 1) +'\n'
-
-    return output
-
-
 class Keyword(object):
-    """
-    This class define the base keyword list supported by all the events
-    """
-    keyword_list = node_keywords
-    data_keys = ['node', 'notification']
+    keyword_list = []
+    data_keys = []
 
     def __init__(self, data):
-        # node and notification are always injected as they contain general information
         for k in self.data_keys:
             if k not in data:
                 raise errors.InternalServerError('Missing key \'%s\' while resolving template \'%s\'' % (k, type(self).__name__))
 
         self.data = data
 
+
+class NodeKeyword(Keyword):
+    keyword_list = node_keywords
+    data_keys = ['node', 'notification']
+
     def NodeName(self):
         return self.data['node']['name']
 
-    def HiddenService(self):
-        return self.data['node']['hidden_service']
+    def _TorUrl(self):
+        return 'http://' + self.data['node']['onionservice'] + '/'
 
-    def PublicSite(self):
-        return self.data['node']['public_site']
+    def _HTTPSUrl(self):
+        return 'https://' + self.data['node']['hostname'] + '/'
+
+    def TorUrl(self):
+        if not self.data['node']['onionservice']:
+            return '[NOT CONFIGURED]'
+
+        return self._TorUrl()
+
+    def HTTPSUrl(self):
+        if not self.data['node']['hostname']:
+            return '[NOT CONFIGURED]'
+
+        return self._HTTPSUrl()
+
+    def TorLoginUrl(self):
+        if not self.data['node']['onionservice']:
+            return '[NOT CONFIGURED]'
+
+        return 'http://' + self.data['node']['onionservice'] + '/#/login'
+
+    def HTTPSLoginUrl(self):
+        if not self.data['node']['hostname']:
+            return '[NOT CONFIGURED]'
+
+        return 'https://' + self.data['node']['hostname'] + '/#/login'
+
+    def DocumentationUrl(self):
+        return 'https://docs.globaleaks.org'
+
+    def AdminCredentials(self):
+        return '\n\n role: admin\n username: admin\n password: admin'
+
+    def RecipientCredentials(self):
+        return '\n\n role: recipient\n username: recipient\n password: recipient'
 
 
-class TipKeyword(Keyword):
-    keyword_list = Keyword.keyword_list + tip_keywords
-    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip']
+class UserKeyword(Keyword):
+    keyword_list = user_keywords
+    data_keys = ['user']
 
-    def TipID(self):
-        return self.data['tip']['id']
+    def RecipientName(self):
+        return self.data['user']['name']
 
-    def TipTorURL(self):
-        hidden_service = self.data['node']['hidden_service']
 
-        if len(hidden_service):
-            retstr = '%s/#/status/%s' % (hidden_service, self.data['tip']['id'])
-        else:
-            retstr = '[NOT CONFIGURED]'
+class UserNodeKeyword(NodeKeyword, UserKeyword):
+    keyword_list = NodeKeyword.keyword_list + UserKeyword.keyword_list
+    data_keys = NodeKeyword.data_keys + UserKeyword.data_keys
 
-        return retstr
 
-    def TipT2WURL(self):
-        public_site = self.data['node']['public_site']
-
-        if not GLSettings.memory_copy.accept_tor2web_access['receiver']:
-            retstr = 'DISABLED'
-        elif len(public_site):
-            retstr =  '%s/#/status/%s' % (public_site, self.data['tip']['id'])
-        else:
-            retstr = '[NOT CONFIGURED]'
-
-        return retstr
-
-    def TorURL(self):
-        return self.TipTorURL()
-
-    def T2WURL(self):
-        return self.TipT2WURL()
-
-    def TipNum(self):
-        return self.data['tip']['sequence_number']
-
-    def TipLabel(self):
-        return self.data['tip']['label']
-
-    def EventTime(self):
-        return ISO8601_to_pretty_str(self.data['tip']['creation_date'], float(self.data['receiver']['timezone']))
-
-    def SubmissionDate(self):
-        return self.EventTime()
-
-    def ExpirationDate(self):
-        # is not time zone dependent, is UTC for everyone
-        return ISO8601_to_day_str(self.data['tip']['expiration_date'], float(self.data['receiver']['timezone']))
-
-    def ExpirationWatch(self):
-        missing_time = ISO8601_to_datetime(self.data['tip']['expiration_date']) - datetime_now()
-        missing_hours = int(divmod(missing_time.total_seconds(), 3600)[0])
-        return str(missing_hours)
+class ContextKeyword(Keyword):
+    keyword_list = context_keywords
+    data_keys = ['context']
 
     def ContextName(self):
         return self.data['context']['name']
 
-    def RecipientName(self):
-        return self.data['receiver']['name']
 
+class TipKeyword(UserNodeKeyword, ContextKeyword):
+    keyword_list = UserNodeKeyword.keyword_list + ContextKeyword.keyword_list + tip_keywords
+    data_keys =  UserNodeKeyword.data_keys + ContextKeyword.data_keys + ['tip']
 
-class CommentKeyword(TipKeyword):
-    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'comment']
+    def dump_field_entry(self, output, field, entry, indent_n):
+        field_type = field['type']
+        if field_type == 'checkbox':
+            for k, v in entry.items():
+                for option in field['options']:
+                    if k == option.get('id', '') and v == 'True':
+                        output += indent(indent_n) + option['label'] + '\n'
+        elif field_type in ['selectbox', 'multichoice']:
+            for option in field['options']:
+                if entry.get('value', '') == option['id']:
+                    output += indent(indent_n) + option['label'] + '\n'
+        elif field_type == 'date':
+            output += indent(indent_n) + ISO8601_to_pretty_str(entry.get('value', '')) + '\n'
+        elif field_type == 'tos':
+            answer = '☑' if entry.get('value', '') == 'True' else '☐'
+            output += indent(indent_n) + answer + '\n'
+        elif field_type == 'fieldgroup':
+            output = self.dump_fields(output, field['children'], entry, indent_n)
+        else:
+            output += indent_text(entry.get('value', ''), indent_n) + '\n'
 
-    def EventTime(self):
-        return ISO8601_to_pretty_str(self.data['comment']['creation_date'], float(self.data['receiver']['timezone']))
+        return output + '\n'
 
+    def dump_fields(self, output, fields, answers, indent_n):
+        rows = {}
+        for f in fields:
+            y = f['y']
+            if y not in rows:
+                rows[y] = []
+            rows[y].append(f)
 
-class MessageKeyword(TipKeyword):
-    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'message']
+        rows = collections.OrderedDict(sorted(rows.items()))
 
-    def EventTime(self):
-        return ISO8601_to_pretty_str(self.data['message']['creation_date'], float(self.data['receiver']['timezone']))
+        for r in rows:
+            rows[r] = sorted(rows[r], key=lambda k: k['x'])
 
+        for _, row in rows.items():
+            for field in row:
+                if field['type'] != 'fileupload' and field['id'] in answers:
+                    output += indent(indent_n) + field['label'] + '\n'
+                    entries = answers[field['id']]
+                    if len(entries) == 1:
+                        output = self.dump_field_entry(output, field, entries[0], indent_n + 1)
+                    else:
+                        i = 1
+                        for entry in entries:
+                            output += indent(indent_n) + '#' + str(i) + '\n'
+                            output = self.dump_field_entry(output, field, entry, indent_n + 2)
+                            i += 1
 
-class FileKeyword(TipKeyword):
-    keyword_list = TipKeyword.keyword_list + file_keywords
-    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'file']
+        return output
 
-    def FileName(self):
-        return self.data['file']['name']
+    def dump_questionnaire_answers(self, questionnaire, answers):
+        output = ''
 
-    def EventTime(self):
-        return ISO8601_to_pretty_str(self.data['file']['creation_date'], float(self.data['receiver']['timezone']))
+        questionnaire = sorted(questionnaire, key=lambda k: k['presentation_order'])
 
-    def FileSize(self):
-        return str(self.data['file']['size'])
+        for step in questionnaire:
+            output += step['label'] + '\n'
+            output = self.dump_fields(output, step['children'], answers, 1) +'\n'
 
-    def FileType(self):
-        return self.data['file']['content_type']
-
-
-class ExportKeyword(TipKeyword):
-    keyword_list = TipKeyword.keyword_list + export_template_keywords
-    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'comments', 'messages', 'files']
+        return output
 
     def dump_messages(self, messages):
         ret = ''
@@ -291,37 +269,105 @@ class ExportKeyword(TipKeyword):
 
         return ret
 
+    def TipID(self):
+        return self.data['tip']['id']
+
+    def _TorUrl(self):
+        return 'http://' + self.data['node']['onionservice'] + '/#/status/' + self.data['tip']['id']
+
+    def _HTTPSUrl(self):
+        return 'https://' + self.data['node']['hostname'] + '/#/status/' + self.data['tip']['id']
+
+    def TipNum(self):
+        return self.data['tip']['sequence_number']
+
+    def TipLabel(self):
+        return self.data['tip']['label']
+
+    def EventTime(self):
+        return ISO8601_to_pretty_str(self.data['tip']['creation_date'])
+
+    def SubmissionDate(self):
+        return self.EventTime()
+
     def QuestionnaireAnswers(self):
-        return dump_questionnaire_answers(self.data['tip']['questionnaire'], self.data['tip']['answers'])
+        return self.dump_questionnaire_answers(self.data['tip']['questionnaire'], self.data['tip']['answers'])
 
     def Comments(self):
-        if len(self.data['comments']) == 0:
-            return '%Blank%'
+        comments = self.data.get('comments', [])
+        if not len(comments):
+            return '{Blank}'
 
         ret = self.data['node']['widget_comments_title'] + ':\n'
-        ret += self.dump_messages(self.data['comments']) + '\n'
+        ret += self.dump_messages(comments) + '\n'
         return ret + '\n'
 
     def Messages(self):
-        if len(self.data['messages']) == 0:
-            return '%Blank%'
+        messages = self.data.get('messages', [])
+        if not len(messages):
+            return '{Blank}'
 
         ret = self.data['node']['widget_messages_title'] + ':\n'
-        ret += self.dump_messages(self.data['messages'])
+        ret += self.dump_messages(messages)
         return ret + '\n'
 
 
+class CommentKeyword(TipKeyword):
+    data_keys =  TipKeyword.data_keys + ['comment']
+
+    def EventTime(self):
+        return ISO8601_to_pretty_str(self.data['comment']['creation_date'])
+
+
+class MessageKeyword(TipKeyword):
+    data_keys =  TipKeyword.data_keys + ['message']
+
+    def EventTime(self):
+        return ISO8601_to_pretty_str(self.data['message']['creation_date'])
+
+
+class FileKeyword(TipKeyword):
+    keyword_list = TipKeyword.keyword_list + file_keywords
+    data_keys =  TipKeyword.data_keys + ['file']
+
+    def FileName(self):
+        return self.data['file']['name']
+
+    def EventTime(self):
+        return ISO8601_to_pretty_str(self.data['file']['creation_date'])
+
+    def FileSize(self):
+        return str(self.data['file']['size'])
+
+
 class ExportMessageKeyword(TipKeyword):
-    keyword_list = TipKeyword.keyword_list + export_template_keywords + export_message_keywords
-    data_keys =  ['node', 'notification', 'context', 'receiver', 'tip', 'message']
+    keyword_list = TipKeyword.keyword_list + export_message_keywords
+    data_keys =  TipKeyword.data_keys + ['message']
 
     def Content(self):
         return self.data['message']['content']
 
 
-class AdminPGPAlertKeyword(Keyword):
-    keyword_list = Keyword.keyword_list + admin_pgp_alert_keywords
-    data_keys =  ['node', 'notification', 'users']
+class ExpirationSummaryKeyword(UserNodeKeyword):
+    keyword_list = UserNodeKeyword.keyword_list + expiration_summary_keywords
+    data_keys =  UserNodeKeyword.data_keys + ['expiring_submission_count', 'earliest_expiration_date']
+
+    def ExpiringSubmissionCount(self):
+        return str(self.data['expiring_submission_count'])
+
+    def EarliestExpirationDate(self):
+        return ISO8601_to_pretty_str(self.data['earliest_expiration_date'])
+
+    def _TorUrl(self):
+        return 'http://' + self.data['node']['onionservice'] + '/#/receiver/tips'
+
+    def _HTTPSUrl(self):
+        return 'https://' + self.data['node']['hostname'] + '/#/receiver/tips'
+
+
+class AdminPGPAlertKeyword(UserNodeKeyword):
+    keyword_list = UserNodeKeyword.keyword_list + admin_pgp_alert_keywords
+    data_keys =  UserNodeKeyword.data_keys + ['users']
 
     def PGPKeyInfoList(self):
         ret = ''
@@ -335,9 +381,8 @@ class AdminPGPAlertKeyword(Keyword):
         return ret
 
 
-class PGPAlertKeyword(Keyword):
-    keyword_list = Keyword.keyword_list + user_pgp_alert_keywords
-    data_keys =  ['node', 'notification', 'user']
+class PGPAlertKeyword(UserNodeKeyword):
+    keyword_list = UserNodeKeyword.keyword_list + user_pgp_alert_keywords
 
     def PGPKeyInfo(self):
         fingerprint = self.data['user']['pgp_key_fingerprint']
@@ -346,36 +391,34 @@ class PGPAlertKeyword(Keyword):
         return '\t0x%s (%s)' % (key, ISO8601_to_day_str(self.data['user']['pgp_key_expiration']))
 
 
-class AnomalyKeyword(Keyword):
-    keyword_list = Keyword.keyword_list + admin_anomaly_keywords
-    data_keys =  ['node', 'notification', 'alert']
+class AnomalyKeyword(UserNodeKeyword):
+    keyword_list = UserNodeKeyword.keyword_list + admin_anomaly_keywords
+    data_keys =  UserNodeKeyword.data_keys + ['alert']
 
     def AnomalyDetailDisk(self):
         # This happens all the time anomalies are present but disk is ok
-        if self.data['alert']['stress_levels']['disk_space'] == 0:
+        if self.data['alert']['alarm_levels']['disk_space'] == 0:
             return u''
 
-        if self.data['alert']['stress_levels']['disk_space'] == 1:
+        if self.data['alert']['alarm_levels']['disk_space'] == 1:
             return self.data['notification']['admin_anomaly_disk_low']
-        elif self.data['alert']['stress_levels']['disk_space'] == 2:
-            return self.data['notification']['admin_anomaly_disk_medium']
         else:
             return self.data['notification']['admin_anomaly_disk_high']
 
     def AnomalyDetailActivities(self):
         # This happens all the time there is not anomalous traffic
-        if self.data['alert']['stress_levels']['activity'] == 0:
+        if self.data['alert']['alarm_levels']['activity'] == 0:
             return u''
 
         return self.data['notification']['admin_anomaly_activities']
 
     def ActivityAlarmLevel(self):
-        return '%s' % self.data['alert']['stress_levels']['activity']
+        return '%s' % self.data['alert']['alarm_levels']['activity']
 
     def ActivityDump(self):
         retstr = ''
 
-        for event, count in self.data['alert']['event_matrix'].iteritems():
+        for event, count in self.data['alert']['event_matrix'].items():
             if not count:
                 continue
             retstr = '%s%s%d\n%s' % (event, (25 - len(event)) * ' ', count, retstr)
@@ -383,10 +426,57 @@ class AnomalyKeyword(Keyword):
         return retstr
 
     def FreeMemory(self):
-        return '%s' % bytes_to_pretty_str(self.data['alert']['latest_measured_freespace'])
+        return '%s' % bytes_to_pretty_str(self.data['alert']['measured_freespace'])
 
     def TotalMemory(self):
-        return '%s' % bytes_to_pretty_str(self.data['alert']['latest_measured_totalspace'])
+        return '%s' % bytes_to_pretty_str(self.data['alert']['measured_totalspace'])
+
+
+class CertificateExprKeyword(UserNodeKeyword):
+    keyword_list = UserNodeKeyword.keyword_list + https_expr_keywords
+    data_keys = UserNodeKeyword.data_keys + ['expiration_date']
+
+    def ExpirationDate(self):
+        # is not time zone dependent, is UTC for everyone
+        return ISO8601_to_day_str(self.data['expiration_date'])
+
+    def _TorUrl(self):
+        return 'http://' + self.data['node']['onionservice'] + '/#/admin/network'
+
+    def _HTTPSUrl(self):
+        return 'https://' + self.data['node']['hostname'] + '/#/admin/network'
+
+
+class SoftwareUpdateKeyword(UserNodeKeyword):
+    keyword_list = UserNodeKeyword.keyword_list + software_update_keywords
+    data_keys = UserNodeKeyword.data_keys + ['latest_version']
+
+    def LatestVersion(self):
+        return '%s' % self.data['latest_version']
+
+    def InstalledVersion(self):
+        return '%s' % __version__
+
+    def ChangeLogUrl(self):
+        return 'https://www.globaleaks.org/r/changelog'
+
+    def UpdateGuideUrl(self):
+        return 'https://www.globaleaks.org/r/upgrade-guide'
+
+
+class PlatformSignupKeyword(NodeKeyword):
+    keyword_list = NodeKeyword.keyword_list + platform_signup_keywords
+    data_keys = NodeKeyword.data_keys + \
+                ['signup', 'activation_url']
+
+    def RecipientName(self):
+        return self.data['signup']['name'] + ' ' + self.data['signup']['surname']
+
+    def ActivationUrl(self):
+        return self.data['activation_url']
+
+    def ExpirationDate(self):
+        return ISO8601_to_day_str(self.data['expiration_date'])
 
 
 supported_template_types = {
@@ -394,23 +484,25 @@ supported_template_types = {
     u'comment': CommentKeyword,
     u'message': MessageKeyword,
     u'file': FileKeyword,
-    u'tip_expiration': TipKeyword,
+    u'tip_expiration_summary': ExpirationSummaryKeyword,
     u'pgp_alert': PGPAlertKeyword,
     u'admin_pgp_alert': AdminPGPAlertKeyword,
-    u'receiver_notification_limit_reached': Keyword,
-    u'export_template': ExportKeyword,
+    u'receiver_notification_limit_reached': UserNodeKeyword,
+    u'export_template': TipKeyword,
     u'export_message': ExportMessageKeyword,
-    u'admin_anomaly': AnomalyKeyword
+    u'admin_anomaly': AnomalyKeyword,
+    u'admin_test': UserNodeKeyword,
+    u'https_certificate_expiration': CertificateExprKeyword,
+    u'software_update_available': SoftwareUpdateKeyword,
+    u'signup': PlatformSignupKeyword,
+    u'activation': PlatformSignupKeyword
 }
 
 
 class Templating(object):
     def format_template(self, raw_template, data):
         keyword_converter = supported_template_types[data['type']](data)
-        iterations = 3
-        stop = False
-        while (stop is False and iterations > 0):
-            iterations -= 1
+        for _ in range(3):
             count = 0
 
             for kw in keyword_converter.keyword_list:
@@ -421,20 +513,24 @@ class Templating(object):
 
                     count += 1
 
-            # remobe lines with only %Blank%
-            raw_template = raw_template.replace('\n%Blank%\n', '\n')
+            # remobe lines with only {Blank}
+            raw_template = raw_template.replace('\n{Blank}\n', '\n')
 
             # remove remaining $Blank% tokens
-            raw_template = raw_template.replace('\n%Blank%\n', '')
+            raw_template = raw_template.replace('\n{Blank}', '')
+
+            raw_template = raw_template.rstrip()
 
             if count == 0:
                 # finally!
-                stop = True
                 break
 
         return raw_template
 
     def get_mail_subject_and_body(self, data):
+        subject_template = ''
+        body_template = ''
+
         if data['type'] == 'export_template':
             # this is currently the only template not used for mail notifications
             pass
@@ -444,10 +540,10 @@ class Templating(object):
         else:
             raise NotImplementedError('This data_type (%s) is not supported' % ['data.type'])
 
-        if data['type'] in [u'tip', u'comment', u'file', u'message', u'tip_expiration']:
-            prefix = '%TipNum% '
-            if data['tip']['label'] != '':
-                prefix += '[%TipLabel%] '
+        if data['type'] in [u'tip', u'comment', u'file', u'message']:
+            prefix = '{TipNum} '
+            if data['tip']['label']:
+                prefix += '[{TipLabel}] '
 
             subject_template = prefix + subject_template
 
@@ -455,12 +551,3 @@ class Templating(object):
         body = self.format_template(body_template, data)
 
         return subject, body
-
-    def db_prepare_mail(self, store, data):
-        subject, body = self.get_mail_subject_and_body(data)
-
-        mail = models.Mail({
-            'address': data['address'],
-            'subject': subject,
-            'body': body
-        })

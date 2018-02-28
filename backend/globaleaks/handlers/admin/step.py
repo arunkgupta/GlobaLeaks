@@ -1,142 +1,126 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #
 #   /admin/steps
 #   *****
 # Implementation of the code executed on handler /admin/steps
 #
-from storm.expr import Not, In
-
-from twisted.internet.defer import inlineCallbacks
 
 from globaleaks import models
-from globaleaks.orm import transact, transact_ro
 from globaleaks.handlers.admin.field import db_create_field, db_update_field
 from globaleaks.handlers.base import BaseHandler
-from globaleaks.handlers.node import serialize_step
+from globaleaks.handlers.operation import OperationHandler
+from globaleaks.handlers.public import serialize_step
+from globaleaks.orm import transact
 from globaleaks.rest import requests, errors
-from globaleaks.rest.apicache import GLApiCache
 from globaleaks.utils.structures import fill_localized_keys
 
 
-def db_create_step(store, step, language):
+def db_create_step(session, tid, step_dict, language):
     """
     Create the specified step
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param language: the language of the specified steps.
     """
-    fill_localized_keys(step, models.Step.localized_keys, language)
+    fill_localized_keys(step_dict, models.Step.localized_keys, language)
 
-    s = models.Step.new(store, step)
+    step = models.db_forge_obj(session, models.Step, step_dict)
 
-    for c in step['children']:
-        c['step_id'] = s.id
-        db_create_field(store, c, language)
+    for c in step_dict['children']:
+        c['tid'] = tid
+        c['step_id'] = step.id
+        db_create_field(session, tid, c, language)
 
-    return s
+    return step
 
 
 @transact
-def create_step(store, step, language):
+def create_step(session, tid, step, language):
     """
     Transaction that perform db_create_step
     """
-    return serialize_step(store, db_create_step(store, step, language), language)
+    return serialize_step(session, tid, db_create_step(session, tid, step, language), language)
 
 
-def db_update_step(store, step_id, request, language):
+def db_update_step(session, tid, step_id, request, language):
     """
     Update the specified step with the details.
-    raises :class:`globaleaks.errors.StepIdNotFound` if the step does
-    not exist.
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param step_id: the step_id of the step to update
     :param request: the step definition dict
     :param language: the language of the step definition dict
     :return: a serialization of the object
     """
-    step = models.Step.get(store, step_id)
-    if not step:
-        raise errors.StepIdNotFound
+    step = models.db_get(session, models.Step, models.Step.id == step_id,
+                                               models.Questionnaire.id == models.Step.questionnaire_id,
+                                               models.Questionnaire.tid == tid)
 
     fill_localized_keys(request, models.Step.localized_keys, language)
 
     step.update(request)
 
     for child in request['children']:
-        db_update_field(store, child['id'], child, language)
+        db_update_field(session, tid, child['id'], child, language)
 
     return step
 
 
 @transact
-def update_step(store, step_id, request, language):
-    return serialize_step(store, db_update_step(store, step_id, request, language), language)
-
-
-@transact_ro
-def get_step(store, step_id, language):
-    """
-    Serialize the specified step
-
-    :param store: the store on which perform queries.
-    :param step_id: the id corresponding to the step.
-    :param language: the language in which to localize data
-    :return: the currently configured step.
-    :rtype: dict
-    """
-    step = store.find(models.Step, models.Step.id == step_id).one()
-    if not step:
-        raise errors.StepIdNotFound
-
-    return serialize_step(store, step, language)
+def update_step(session, tid, step_id, request, language):
+    return serialize_step(session, tid, db_update_step(session, tid, step_id, request, language), language)
 
 
 @transact
-def delete_step(store, step_id):
-    """
-    Delete the step object corresponding to step_id
+def order_elements(session, handler, req_args, *args, **kwargs):
+    steps = session.query(models.Step) \
+                 .filter(models.Step.questionnaire_id == req_args['questionnaire_id'],
+                         models.Questionnaire.id == req_args['questionnaire_id'],
+                         models.Questionnaire.tid == handler.request.tid)
 
-    If the step has children, remove them as well.
+    id_dict = {step.id: step for step in steps}
+    ids = req_args['ids']
 
-    :param store: the store on which perform queries.
-    :param step_id: the id corresponding to the step.
-    :raises StepIdNotFound: if no such step is found.
-    """
-    step = store.find(models.Step, models.Step.id == step_id).one()
-    if not step:
-        raise errors.StepIdNotFound
+    if len(ids) != len(id_dict) and set(ids) != set(id_dict):
+        raise errors.InputValidationError('list does not contain all context ids')
 
-    store.remove(step)
+    for i, step_id in enumerate(ids):
+        id_dict[step_id].presentation_order = i
 
 
-class StepCollection(BaseHandler):
+class StepCollection(OperationHandler):
     """
     Operation to create a step
 
     /admin/steps
     """
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
+    check_roles = 'admin'
+    cache_resource = True
+    invalidate_cache = True
+
     def post(self):
         """
         Create a new step.
 
         :return: the serialized step
         :rtype: StepDesc
-        :raises InvalidInputFormat: if validation fails.
+        :raises InputValidationError: if validation fails.
         """
-        request = self.validate_message(self.request.body,
+        request = self.validate_message(self.request.content.read(),
                                         requests.AdminStepDesc)
 
-        response = yield create_step(request, self.request.language)
+        return create_step(self.request.tid, request, self.request.language)
 
-        GLApiCache.invalidate('contexts')
-
-        self.set_status(201)
-        self.write(response)
+    def operation_descriptors(self):
+        return {
+            'order_elements': (
+                order_elements,
+                {
+                  'questionnaire_id': requests.uuid_regexp,
+                  'ids': [unicode],
+                }
+            )
+        }
 
 
 class StepInstance(BaseHandler):
@@ -145,27 +129,9 @@ class StepInstance(BaseHandler):
 
     /admin/step
     """
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
-    def get(self, step_id):
-        """
-        Get the step identified by step_id
+    check_roles = 'admin'
+    invalidate_cache = True
 
-        :param step_id:
-        :return: the serialized step
-        :rtype: StepDesc
-        :raises StepIdNotFound: if there is no step with such id.
-        :raises InvalidInputFormat: if validation fails.
-        """
-        response = yield get_step(step_id, self.request.language)
-
-        self.write(response)
-
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def put(self, step_id):
         """
         Update attributes of the specified step
@@ -173,31 +139,20 @@ class StepInstance(BaseHandler):
         :param step_id:
         :return: the serialized step
         :rtype: StepDesc
-        :raises StepIdNotFound: if there is no step with such id.
-        :raises InvalidInputFormat: if validation fails.
+        :raises InputValidationError: if validation fails.
         """
-        request = self.validate_message(self.request.body,
+        request = self.validate_message(self.request.content.read(),
                                         requests.AdminStepDesc)
 
-        response = yield update_step(step_id, request, self.request.language)
+        return update_step(self.request.tid, step_id, request, self.request.language)
 
-        GLApiCache.invalidate('contexts')
-
-        self.set_status(202) # Updated
-        self.write(response)
-
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def delete(self, step_id):
         """
         Delete the specified step.
 
         :param step_id:
-        :raises StepIdNotFound: if there is no step with such id.
-        :raises InvalidInputFormat: if validation fails.
+        :raises InputValidationError: if validation fails.
         """
-        yield delete_step(step_id)
-
-        GLApiCache.invalidate('contexts')
+        return models.delete(models.Step, models.Step.id == step_id,
+                                          models.Questionnaire.id == models.Step.questionnaire_id,
+                                          models.Questionnaire.tid == self.request.tid)

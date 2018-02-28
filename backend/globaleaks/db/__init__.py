@@ -1,281 +1,233 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 # Database routines
 # ******************
-import base64
 import os
-import re
 import sys
 import traceback
+import warnings
 
-from storm import exceptions
+from sqlalchemy import exc as sa_exc
 
-from twisted.internet.defer import succeed, inlineCallbacks
+from globaleaks import models, DATABASE_VERSION
+from globaleaks.handlers.base import Session
+from globaleaks.models.config import Config
+from globaleaks.models.config_desc import ConfigFilters
+from globaleaks.orm import transact, transact_sync
+from globaleaks.settings import Settings
+from globaleaks.state import State, TenantState
+from globaleaks.utils import security
+from globaleaks.utils.objectdict import ObjectDict
+from globaleaks.utils.utility import log
 
-from globaleaks import models,  __version__, DATABASE_VERSION
-from globaleaks.db.appdata import db_update_appdata
-from globaleaks.handlers.admin.user import db_create_admin_user
-from globaleaks.orm import transact, transact_ro
-from globaleaks.rest import requests
-from globaleaks.security import generateRandomSalt
-from globaleaks.settings import GLSettings
-from globaleaks.utils.utility import log, datetime_null
+def get_db_file(db_path):
+    for i in reversed(range(0, DATABASE_VERSION + 1)):
+        file_name = 'glbackend-%d.db' % i
+        db_file_path = os.path.join(db_path, file_name)
+        if os.path.exists(db_file_path):
+            return (i, db_file_path)
 
-
-def init_models():
-    for model in models.model_list:
-        model()
-    return succeed(None)
-
-
-def db_create_tables(store):
-    if not os.access(GLSettings.db_schema, os.R_OK):
-        log.err("Unable to access %s" % GLSettings.db_schema)
-        raise Exception("Unable to access db schema file")
-
-    with open(GLSettings.db_schema) as f:
-        create_queries = ''.join(f.readlines()).split(';')
-        for create_query in create_queries:
-            try:
-                store.execute(create_query + ';')
-            except exceptions.OperationalError as exc:
-                log.err("OperationalError in [%s]" % create_query)
-                log.err(exc)
-
-    init_models()
-    # new is the only Models function executed without @transact, call .add, but
-    # the called has to .commit and .close, operations commonly performed by decorator
+    return (0, '')
 
 
-@transact
-def init_db(store):
-    db_create_tables(store)
-    appdata_dict = db_update_appdata(store)
+def create_db():
+    from globaleaks.orm import get_engine
+    from globaleaks.models import Base
 
-    log.debug("Performing database initialization...")
+    engine = get_engine()
+    engine.execute('PRAGMA foreign_keys = ON')
+    engine.execute('PRAGMA secure_delete = ON')
+    engine.execute('PRAGMA auto_vacuum = FULL')
 
-    node = models.Node()
-    node.wizard_done = GLSettings.skip_wizard
-    node.receipt_salt = generateRandomSalt()
-
-    for k in appdata_dict['node']:
-        setattr(node, k, appdata_dict['node'][k])
-
-    notification = models.Notification()
-    for k in appdata_dict['templates']:
-        setattr(notification, k, appdata_dict['templates'][k])
-
-    logo = ''
-    with open(os.path.join(GLSettings.client_path, 'logo.png'), 'r') as logo_file:
-        logo = logo_file.read()
-
-    node.logo = models.File()
-    node.logo.data = base64.b64encode(logo)
-
-    store.add(node)
-    store.add(notification)
-
-    admin_dict = {
-        'username': u'admin',
-        'password': u'globaleaks',
-        'deeletable': False,
-        'role': u'admin',
-        'state': u'enabled',
-        'deletable': False,
-        'name': u'Admin',
-        'description': u'',
-        'mail_address': u'',
-        'language': node.default_language,
-        'timezone': node.default_timezone,
-        'password_change_needed': False,
-        'pgp_key_remove': False,
-        'pgp_key_status': 'disabled',
-        'pgp_key_info': '',
-        'pgp_key_fingerprint': '',
-        'pgp_key_public': '',
-        'pgp_key_expiration': datetime_null()
-    }
-
-    admin = db_create_admin_user(store, admin_dict, node.default_language)
-    admin.password_change_needed = False
+    Base.metadata.create_all(engine)
 
 
-def check_db_files():
+@transact_sync
+def init_db(session):
+    from globaleaks.handlers.admin import tenant
+    tenant.db_create(session, {})
+
+
+def update_db():
     """
-    This function checks the database version and executes eventually
-    executes migration scripts
+    This function handles update of an existing database
     """
-    db_files = []
-    max_version = 0
-    min_version = 0
-    for filename in os.listdir(GLSettings.db_path):
-        if filename.startswith('glbackend'):
-            filepath = os.path.join(GLSettings.db_path, filename)
-            if filename.endswith('.db'):
-                db_files.append(filepath)
-                nameindex = filename.rfind('glbackend')
-                extensindex = filename.rfind('.db')
-                fileversion = int(filename[nameindex + len('glbackend-'):extensindex])
-                max_version = fileversion if fileversion > max_version else max_version
-                min_version = fileversion if fileversion < min_version else min_version
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=sa_exc.SAWarning)
 
-    db_version = max_version
+            from globaleaks.db import migration
 
-    if len(db_files) == 1 and db_version > 0:
-        from globaleaks.db import migration
-        log.msg("Found an already initialized database version: %d" % db_version)
+            db_version, db_file_path = get_db_file(Settings.db_path)
+            if db_version == 0:
+                return 0
 
-        if db_version < DATABASE_VERSION:
-            log.msg("Performing update of database from version %d to version %d" % (db_version, DATABASE_VERSION))
-            try:
-                migration.perform_version_update(db_version)
-            except Exception as exception:
-                log.msg("Migration failure: %s" % exception)
-                log.msg("Verbose exception traceback:")
-                etype, value, tback = sys.exc_info()
-                log.msg('\n'.join(traceback.format_exception(etype, value, tback)))
-                return -1
+            log.err('Found an already initialized database version: %d', db_version)
+            if db_version == DATABASE_VERSION:
+                migration.perform_data_update(db_file_path)
+                return DATABASE_VERSION
 
-            log.msg("Migration completed with success!")
+            log.err('Performing schema migration from version %d to version %d', db_version, DATABASE_VERSION)
 
-    elif len(db_files) > 1:
-        log.msg("Error: Cannot start the application because more than one database file are present in: %s" % GLSettings.db_path)
-        log.msg("Manual check needed and is suggested to first make a backup of %s\n" % GLSettings.working_path)
-        log.msg("Files found:")
+            migration.perform_migration(db_version)
 
-        for f in db_files:
-            log.msg("\t%s" % f)
-
+    except Exception as exception:
+        log.err('Migration failure: %s', exception)
+        log.err('Verbose exception traceback:')
+        etype, value, tback = sys.exc_info()
+        log.info('\n'.join(traceback.format_exception(etype, value, tback)))
         return -1
 
-    return db_version
+    log.err('Migration completed with success!')
+
+    return DATABASE_VERSION
 
 
-@transact_ro
-def get_tracked_files(store):
+def db_get_tracked_files(session):
     """
     returns a list the basenames of files tracked by InternalFile and ReceiverFile.
     """
-    ifiles = list(store.find(models.InternalFile).values(models.InternalFile.file_path))
-    rfiles = list(store.find(models.ReceiverFile).values(models.ReceiverFile.file_path))
+    ifiles = [x[0] for x in session.query(models.InternalFile.file_path)]
+    rfiles = [x[0] for x in session.query(models.ReceiverFile.file_path)]
+    wbfiles = [x[0] for x in session.query(models.WhistleblowerFile.file_path)]
+    return [ os.path.basename(files) for files in list(set(ifiles + rfiles + wbfiles)) ]
 
-    return [os.path.basename(files) for files in list(set(ifiles + rfiles))]
 
-
-@inlineCallbacks
-def clean_untracked_files():
+@transact_sync
+def sync_clean_untracked_files(session):
     """
-    removes files in GLSettings.submission_path that are not
+    removes files in Settings.attachments_path that are not
     tracked by InternalFile/ReceiverFile.
     """
-    tracked_files = yield get_tracked_files()
-    for filesystem_file in os.listdir(GLSettings.submission_path):
+    tracked_files = db_get_tracked_files(session)
+    for filesystem_file in os.listdir(Settings.attachments_path):
         if filesystem_file not in tracked_files:
-            file_to_remove = os.path.join(GLSettings.submission_path, filesystem_file)
+            file_to_remove = os.path.join(Settings.attachments_path, filesystem_file)
             try:
-                os.remove(file_to_remove)
+                log.debug('Removing untracked file: %s', file_to_remove)
+                security.overwrite_and_remove(file_to_remove)
             except OSError:
-                log.err("Failed to remove untracked file" % file_to_remove)
+                log.err('Failed to remove untracked file', file_to_remove)
 
 
-def db_refresh_memory_variables(store):
+def db_set_cache_exception_delivery_list(session, tenant_cache):
+    """
+    Constructs and sets a list of (email_addr, public_key) pairs that will receive
+    errors from the platform. If the email_addr is empty, drop the tuple from the list.
+    """
+    lst = []
+
+    if tenant_cache.enable_developers_exception_notification:
+        lst.append((u'globaleaks-stackexception@lists.globaleaks.org', ''))
+
+    if tenant_cache.enable_admin_exception_notification:
+        results = session.query(models.User.mail_address, models.User.pgp_key_public).filter(models.User.role == u'admin')
+        lst.extend([(mail, pub_key) for mail, pub_key in results])
+
+    if Settings.developer_name:
+        tenant_cache.notification.source_name = Settings.developer_name
+
+    tenant_cache.notification.exception_delivery_list = filter(lambda x: x[0] != '', lst)
+
+
+def db_refresh_tenant_cache(session, tid_list):
     """
     This routine loads in memory few variables of node and notification tables
     that are subject to high usage.
     """
-    node = store.find(models.Node).one()
+    for cfg in session.query(Config).filter(Config.tid.in_(tid_list)):
+        tenant_cache = State.tenant_cache[cfg.tid]
 
-    GLSettings.memory_copy.nodename = node.name
+        if cfg.var_name in ConfigFilters['node']:
+            tenant_cache[cfg.var_name] = cfg.get_v()
+        elif cfg.var_name in ConfigFilters['notification']:
+            tenant_cache.setdefault('notification', ObjectDict())
+            tenant_cache['notification'][cfg.var_name] = cfg.get_v()
 
-    GLSettings.memory_copy.basic_auth = node.basic_auth
-    GLSettings.memory_copy.basic_auth_username = node.basic_auth_username
-    GLSettings.memory_copy.basic_auth_password = node.basic_auth_password
+    for tid, lang in models.EnabledLanguage.tid_list(session, tid_list):
+        State.tenant_cache[tid].setdefault('languages_enabled', []).append(lang)
 
-    GLSettings.memory_copy.maximum_filesize = node.maximum_filesize
-    GLSettings.memory_copy.maximum_namesize = node.maximum_namesize
-    GLSettings.memory_copy.maximum_textsize = node.maximum_textsize
 
-    GLSettings.memory_copy.accept_tor2web_access = {
-        'admin': node.tor2web_admin,
-        'custodian': node.tor2web_custodian,
-        'whistleblower': node.tor2web_whistleblower,
-        'receiver': node.tor2web_receiver,
-        'unauth': node.tor2web_unauth
-    }
+def db_refresh_memory_variables(session, to_refresh=None):
+    session.flush()
 
-    GLSettings.memory_copy.can_postpone_expiration = node.can_postpone_expiration
-    GLSettings.memory_copy.can_delete_submission =  node.can_delete_submission
-    GLSettings.memory_copy.can_grant_permissions = node.can_grant_permissions
+    tenant_map = {tenant.id:tenant for tenant in session.query(models.Tenant).filter(models.Tenant.active == True)}
 
-    GLSettings.memory_copy.submission_minimum_delay = node.submission_minimum_delay
-    GLSettings.memory_copy.submission_maximum_ttl =  node.submission_maximum_ttl
+    existing_tids = set(tenant_map.keys())
+    cached_tids = set(State.tenant_state.keys())
 
-    GLSettings.memory_copy.allow_indexing = node.allow_indexing
-    GLSettings.memory_copy.allow_unencrypted = node.allow_unencrypted
-    GLSettings.memory_copy.allow_iframes_inclusion = node.allow_iframes_inclusion
+    to_remove = cached_tids - existing_tids
+    to_add = existing_tids - cached_tids
 
-    GLSettings.memory_copy.enable_captcha = node.enable_captcha
-    GLSettings.memory_copy.enable_proof_of_work = node.enable_proof_of_work
+    for tid in to_remove:
+        if tid in State.tenant_state:
+            del State.tenant_state[tid]
 
-    GLSettings.memory_copy.default_language = node.default_language
-    GLSettings.memory_copy.default_timezone = node.default_timezone
-    GLSettings.memory_copy.languages_enabled  = node.languages_enabled
+        if tid in State.tenant_cache:
+            del State.tenant_cache[tid]
 
-    GLSettings.memory_copy.receipt_salt  = node.receipt_salt
+    for tid in to_add:
+        State.tenant_state[tid] = TenantState(State)
+        State.tenant_cache[tid] = ObjectDict()
 
-    GLSettings.memory_copy.simplified_login = node.simplified_login
-
-    GLSettings.memory_copy.threshold_free_disk_megabytes_high = node.threshold_free_disk_megabytes_high
-    GLSettings.memory_copy.threshold_free_disk_megabytes_medium = node.threshold_free_disk_megabytes_medium
-    GLSettings.memory_copy.threshold_free_disk_megabytes_low = node.threshold_free_disk_megabytes_low
-
-    GLSettings.memory_copy.threshold_free_disk_percentage_high = node.threshold_free_disk_percentage_high
-    GLSettings.memory_copy.threshold_free_disk_percentage_medium = node.threshold_free_disk_percentage_medium
-    GLSettings.memory_copy.threshold_free_disk_percentage_low = node.threshold_free_disk_percentage_low
-
-    notif = store.find(models.Notification).one()
-
-    GLSettings.memory_copy.notif_server = notif.server
-    GLSettings.memory_copy.notif_port = notif.port
-    GLSettings.memory_copy.notif_password = notif.password
-    GLSettings.memory_copy.notif_username = notif.username
-    GLSettings.memory_copy.notif_source_email = notif.source_email
-    GLSettings.memory_copy.notif_security = notif.security
-    GLSettings.memory_copy.tip_expiration_threshold = notif.tip_expiration_threshold
-    GLSettings.memory_copy.notification_threshold_per_hour = notif.notification_threshold_per_hour
-    GLSettings.memory_copy.notification_suspension_time = notif.notification_suspension_time
-
-    if GLSettings.developer_name:
-        GLSettings.memory_copy.notif_source_name = GLSettings.developer_name
+    if to_refresh is None:
+        to_refresh = tenant_map.keys()
     else:
-        GLSettings.memory_copy.notif_source_name = notif.source_name
+        to_refresh = [tid for tid in to_refresh if tid in tenant_map]
 
-    GLSettings.memory_copy.notif_source_name = notif.source_name
-    GLSettings.memory_copy.notif_source_email = notif.source_email
+    if to_refresh:
+        db_refresh_tenant_cache(session, to_refresh)
 
-    GLSettings.memory_copy.exception_email_address = notif.exception_email_address
-    GLSettings.memory_copy.exception_email_pgp_key_info = notif.exception_email_pgp_key_info
-    GLSettings.memory_copy.exception_email_pgp_key_fingerprint = notif.exception_email_pgp_key_fingerprint
-    GLSettings.memory_copy.exception_email_pgp_key_public = notif.exception_email_pgp_key_public
-    GLSettings.memory_copy.exception_email_pgp_key_expiration = notif.exception_email_pgp_key_expiration
-    GLSettings.memory_copy.exception_email_pgp_key_status = notif.exception_email_pgp_key_status
+    if 1 in to_refresh:
+        to_refresh = State.tenant_cache.keys()
+        db_set_cache_exception_delivery_list(session, State.tenant_cache[1])
 
-    if GLSettings.disable_mail_notification:
-        GLSettings.memory_copy.disable_admin_notification_emails = True
-        GLSettings.memory_copy.disable_custodian_notification_emails = True
-        GLSettings.memory_copy.disable_receiver_notification_emails = True
-    else:
-        GLSettings.memory_copy.disable_admin_notification_emails = notif.disable_admin_notification_emails
-        GLSettings.memory_copy.disable_admin_custodian_emails = notif.disable_custodian_notification_emails
-        GLSettings.memory_copy.disable_receiver_notification_emails = notif.disable_receiver_notification_emails
+        if State.tenant_cache[1].admin_api_token_digest:
+            api_id = session.query(models.User.id).filter(models.User.tid == 1, models.User.role == u'admin').order_by(models.User.creation_date).first()
+            if api_id is not None:
+                State.api_token_session = Session(1, api_id, 'admin', 'enabled')
 
+    rootdomain = State.tenant_cache[1].rootdomain
+    root_onionservice = State.tenant_cache[1].onionservice
 
-@transact_ro
-def refresh_memory_variables(*args):
-    return db_refresh_memory_variables(*args)
+    for tid in to_refresh:
+        if tid not in tenant_map:
+            continue
+
+        tenant = tenant_map[tid]
+        hostnames = []
+        onionnames = []
+        if not tenant.active and tid != 1:
+            continue
+
+        if rootdomain != '':
+            hostnames.append('p{}.{}'.format(tid, rootdomain))
+
+        if root_onionservice != '':
+            onionnames.append('p{}.{}'.format(tid, root_onionservice))
+
+        if tenant.subdomain != '':
+            if rootdomain != '':
+                onionnames.append('{}.{}'.format(tenant.subdomain, rootdomain))
+            if root_onionservice != '':
+                onionnames.append('{}.{}'.format(tenant.subdomain, root_onionservice))
+
+        if State.tenant_cache[tid].hostname != '':
+            hostnames.append(State.tenant_cache[tid].hostname)
+
+        if State.tenant_cache[tid].onionservice != '':
+            onionnames.append(State.tenant_cache[tid].onionservice)
+
+        State.tenant_cache[tid].hostnames = hostnames
+        State.tenant_cache[tid].onionnames = onionnames
+
+        State.tenant_hostname_id_map.update({h:tid for h in hostnames + onionnames})
 
 
 @transact
-def update_version(store):
-    node = store.find(models.Node).one()
-    node.version = unicode(__version__)
-    node.version_db = unicode(DATABASE_VERSION)
+def refresh_memory_variables(session, to_refresh=None):
+    return db_refresh_memory_variables(session, to_refresh)
+
+
+@transact_sync
+def sync_refresh_memory_variables(session, to_refresh=None):
+    return db_refresh_memory_variables(session, to_refresh)

@@ -1,70 +1,60 @@
-GLClient.controller('WizardCtrl', ['$scope', '$rootScope', '$location', '$route', '$http', '$uibModal', 'Admin',
-                    'DefaultAppdata', 'CONSTANTS',
-                    function($scope, $rootScope, $location, $route, $http, $uibModal, Admin,
-                             DefaultAppdata, CONSTANTS) {
-    $scope.email_regexp = CONSTANTS.email_regexp;
+GLClient.controller('WizardCtrl', ['$scope', '$location', '$route', '$http', 'Authentication', 'CONSTANTS',
+                    function($scope, $location, $route, $http, Authentication, CONSTANTS) {
+  /* if the wizard has been already performed redirect to the homepage */
+  if ($scope.node.wizard_done) {
+    $location.path('/');
+    return;
+  }
 
-    $scope.step = 1;
+  $scope.email_regexp = CONSTANTS.email_regexp;
 
-    var finished = false;
+  $scope.step = 1;
 
-    $scope.open_modal_allow_unencrypted = function() {
-      if (!$scope.admin.node.allow_unencrypted) {
+  var completed = false;
+
+  $scope.complete = function() {
+    if (completed) {
         return;
-      }
+    }
 
-      var modalInstance = $uibModal.open({
-        templateUrl: 'views/partials/disable_encryption.html',
-        controller: 'DisableEncryptionCtrl'
-      });
+    completed = true;
 
-      modalInstance.result.then(function(result){
-        $scope.admin.node.allow_unencrypted = result;
-      });
-    };
+    $http.post('wizard', $scope.wizard).then(function() {
+      $scope.step += 1;
+    });
+  };
 
+  $scope.goToAdminInterface = function() {
+    Authentication.login('admin', $scope.wizard.admin_password, null, function() {
+      $scope.reload("/admin/home");
+    });
+  };
 
-    $scope.finish = function() {
-      if (!finished) {
-        var admin = {
-          'mail_address': $scope.admin_mail_address,
-          'old_password': 'globaleaks',
-          'password': $scope.admin_password
-        };
+  $scope.config_profiles = [
+    {
+      name:  'default',
+      title: 'Default',
+      active: true
+    }
+  ];
 
-        $scope.wizard = {
-          'node': $scope.admin.node,
-          'admin': admin,
-          'receiver': $scope.receiver,
-          'context': $scope.context
-        };
-
-        $http.post('admin/wizard', $scope.wizard).success(function() {
-          $scope.reload("/admin/landing");
-        });
-      }
-    };
-
-    $scope.$watch("language", function (newVal, oldVal) {
-      if (newVal && newVal !== oldVal) {
-        $rootScope.language = $scope.language;
+  $scope.selectProfile = function(name) {
+    angular.forEach($scope.config_profiles, function(p) {
+      p.active = p.name === name ? true : false;
+      if (p.active) {
+        $scope.wizard.profile = p.name;
       }
     });
+  };
 
-    if ($scope.node.wizard_done) {
-      /* if the wizard has been already performed redirect to the homepage */
-      $location.path('/');
-    } else {
-      $scope.login('admin', 'globaleaks', function(){
-        $scope.admin = new Admin(function() {
-          $scope.receiver = new $scope.admin.new_user();
-          $scope.receiver.username = 'receiver';
-          $scope.receiver.password = ''; // this causes the system to set the default password
-                                         // the system will then force the user to change the password
-                                         // at first login
-          $scope.context = $scope.admin.new_context();
-        });
-      });
-    }
-  }
-]);
+  $scope.wizard = {
+    'node_name': '',
+    'admin_password': '',
+    'admin_name': '',
+    'admin_mail_address': '',
+    'receiver_name': '',
+    'receiver_mail_address': '',
+    'profile': 'default',
+    'enable_developers_exception_notification': true
+  };
+}]);

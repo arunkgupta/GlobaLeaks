@@ -1,78 +1,16 @@
-GLClient.controller('AdminFieldTemplatesCtrl', ['$scope', 'AdminFieldResource', 'AdminFieldTemplateResource',
-  function($scope, AdminFieldResource, AdminFieldTemplateResource) {
-    $scope.admin.fieldtemplates.$promise.then(function(fields) {
-      $scope.fields = fields;
-    });
-
-    $scope.addField = function(new_field) {
-      $scope.fields.push(new_field);
-    };
-
-    $scope.delField = function(fields, field) {
-      AdminFieldTemplateResource['delete']({
-        id: field.id
-      }, function() {
-        $scope.deleteFromList(fields, field);
-      });
-    };
-
-    $scope.delAllFields = function() {
-      angular.forEach($scope.fields, function(field) {
-        $scope.delField($scope.fields, field);
-      });
-    };
-
-    $scope.exportQuestionTemplates = function() {
-      AdminFieldTemplateResource.query({export: true}).$promise.then(function(fields) {
-        $scope.exportJSON(fields, 'question-templates.json');
-      });
-    };
-
-    $scope.exportQuestion = function(id) {
-      AdminFieldTemplateResource.get({export: true, id: id}).$promise.then(function(field) {
-        $scope.exportJSON(field, 'question-' + id + '.json');
-      });
-    };
-
-    $scope.importQuestions = function(fields) {
-      fields = angular.fromJson(fields);
-
-      if (!angular.isArray(fields)) {
-        fields = [fields];
-      }
-
-      angular.forEach(fields, function(field) {
-        field = new AdminFieldTemplateResource(field);
-        field.id = '';
-        field.$save({import: true}, function() {
-          $scope.reload();
-        });
-
-      });
-    };
-  }
-]).
-controller('AdminFieldEditorCtrl', ['$scope', '$filter', '$uibModal', 'AdminFieldResource', 'AdminFieldTemplateResource',
-  function($scope, $filter, $uibModal, AdminFieldResource, AdminFieldTemplateResource) {
-    $scope.editable = $scope.field.editable === true && $scope.field.instance !== 'reference';
+GLClient.controller('AdminFieldEditorCtrl', ['$scope', '$uibModal', 'Utils',
+  function($scope, $uibModal, Utils) {
     $scope.editing = false;
     $scope.new_field = {};
-    $scope.fields = $scope.field.children;
 
-    if ($scope.$parent.fields) {
-      $scope.siblings = $scope.$parent.fields;
-    } else {
-      $scope.siblings = $scope.step.children;
+    if ($scope.children) {
+      $scope.fields = $scope.children;
     }
 
-    $scope.siblings = $filter('filter')($scope.siblings, {'id': '!' + $scope.field.id});
+    $scope.children = $scope.field.children;
 
     $scope.toggleEditing = function () {
       $scope.editing = !$scope.editing;
-    };
-
-    $scope.isMarkableRequired = function(field) {
-      return (['fieldgroup', 'fileupload'].indexOf(field.type) === -1);
     };
 
     $scope.isMarkableMultiEntry = function(field) {
@@ -100,11 +38,11 @@ controller('AdminFieldEditorCtrl', ['$scope', '$filter', '$uibModal', 'AdminFiel
     };
 
     $scope.showConfiguration = function(field) {
-      if (['inputbox', 'textarea', 'checkbox', 'multichoice', 'tos', 'date'].indexOf(field.type) > -1) {
+      if (['inputbox', 'textarea', 'checkbox', 'multichoice', 'selectbox', 'tos', 'date'].indexOf(field.type) > -1) {
         return true;
       }
 
-      if (field.instance === 'template' && (['whistleblower_identity'].indexOf(field.key) > -1)) {
+      if (field.instance === 'template' && (['whistleblower_identity'].indexOf(field.id) > -1)) {
         return true;
       }
 
@@ -119,65 +57,88 @@ controller('AdminFieldEditorCtrl', ['$scope', '$filter', '$uibModal', 'AdminFiel
       return false;
     };
 
-    $scope.addField = function(field) {
-      $scope.field.children.push(field);
+    $scope.addField = function(new_field) {
+      $scope.field.children.push(new_field);
     };
 
-    $scope.addOption = function (field) {
+    $scope.delField = function(field) {
+      return Utils.deleteResource($scope.fieldResource, $scope.fields, field);
+    };
+
+    $scope.showAddQuestion = $scope.showAddQuestionFromTemplate = false;
+    $scope.toggleAddQuestion = function() {
+      $scope.showAddQuestion = !$scope.showAddQuestion;
+      $scope.showAddQuestionFromTemplate = false;
+    };
+
+    $scope.toggleAddQuestionFromTemplate = function() {
+      $scope.showAddQuestionFromTemplate = !$scope.showAddQuestionFromTemplate;
+      $scope.showAddQuestion = false;
+    };
+
+    $scope.addOption = function () {
       var new_option = {
         'id': '',
         'label': '',
         'score_points': 0,
-        'trigger_field': '',
-        'trigger_step': ''
+        'trigger_field': ''
       };
 
-      new_option.presentation_order = $scope.newItemOrder(field.options, 'presentation_order');
+      new_option.presentation_order = $scope.newItemOrder($scope.field.options, 'presentation_order');
 
-      field.options.push(new_option);
+      $scope.field.options.push(new_option);
     };
 
-    $scope.delOption = function(field, option) {
-      var index = field.options.indexOf(option);
-      field.options.splice(index, 1);
+    $scope.moveOptionUp = function(idx) { swapOption(idx, -1); };
+    $scope.moveOptionDown = function(idx) { swapOption(idx, 1); };
+
+    function swapOption(index, n) {
+      var target = index + n;
+      if (target < 0 || target >= $scope.field.options.length) {
+        return;
+      }
+      var a = $scope.field.options[target];
+      var b = $scope.field.options[index];
+      $scope.field.options[target] = b;
+      $scope.field.options[index] = a;
+    }
+
+    $scope.delOption = function(option) {
+      $scope.field.options.splice($scope.field.options.indexOf(option), 1);
     };
 
     $scope.save_field = function(field) {
       var updated_field;
 
-      $scope.assignUniqueOrderIndex(field.options);
+      Utils.assignUniqueOrderIndex(field.options);
 
-      if (field.instance === 'template') {
-        updated_field = new AdminFieldTemplateResource(field);
-      } else {
-        updated_field = new AdminFieldResource(field);
-      }
+      updated_field = new $scope.fieldResource(field);
 
-      $scope.update(updated_field);
+      Utils.update(updated_field);
     };
 
     $scope.moveUpAndSave = function(elem) {
-      $scope.moveUp(elem);
+      Utils.moveUp(elem);
       $scope.save_field(elem);
     };
 
     $scope.moveDownAndSave = function(elem) {
-      $scope.moveDown(elem);
+      Utils.moveDown(elem);
       $scope.save_field(elem);
     };
 
     $scope.moveLeftAndSave = function(elem) {
-      $scope.moveLeft(elem);
+      Utils.moveLeft(elem);
       $scope.save_field(elem);
     };
 
     $scope.moveRightAndSave = function(elem) {
-      $scope.moveRight(elem);
+      Utils.moveRight(elem);
       $scope.save_field(elem);
     };
 
     $scope.add_field = function() {
-      var field = $scope.admin.new_field('', $scope.field.id);
+      var field = $scope.admin_utils.new_field('', $scope.field.id);
       field.label = $scope.new_field.label;
       field.type = $scope.new_field.type;
       field.attrs = $scope.admin.get_field_attrs(field.type);
@@ -196,7 +157,7 @@ controller('AdminFieldEditorCtrl', ['$scope', '$filter', '$uibModal', 'AdminFiel
     };
 
     $scope.add_field_from_template = function(template_id) {
-      var field = $scope.admin.new_field_from_template(template_id, '', $scope.field.id);
+      var field = $scope.admin_utils.new_field_from_template(template_id, '', $scope.field.id);
 
       if ($scope.$parent.field) {
         field.y = $scope.newItemOrder($scope.$parent.field.children, 'y');
@@ -209,21 +170,62 @@ controller('AdminFieldEditorCtrl', ['$scope', '$filter', '$uibModal', 'AdminFiel
       });
     };
 
-    $scope.fieldIsMarkableRequired = $scope.isMarkableRequired($scope.field);
     $scope.fieldIsMarkableMultiEntry = $scope.isMarkableMultiEntry($scope.field);
     $scope.fieldIsMarkableSubjectToStats = $scope.isMarkableSubjectToStats($scope.field);
     $scope.fieldIsMarkableSubjectToPreview = $scope.isMarkableSubjectToPreview($scope.field);
 
-    $scope.triggerFieldDialog = function(option) {
-      return $scope.openConfirmableModalDialog('views/partials/trigger_field.html', option, $scope);
-    };
+    function findParents(field_id, field_lst) {
+       for (var i = 0; i < field_lst.length; i++) {
+         var field = field_lst[i];
+         var pot = [field.id].concat(findParents(field_id, field.children));
+         if (pot.indexOf(field_id) > -1) {
+            return pot;
+         }
+       }
+       return [];
+    }
 
-    $scope.triggerStepDialog = function(option) {
-      return $scope.openConfirmableModalDialog('views/partials/trigger_step.html', option, $scope);
+    $scope.triggerFieldDialog = function(option) {
+      var t = [];
+      $scope.questionnaire.steps.forEach(function(step) {
+        step.children.forEach(function(f) {
+          t.push(f);
+          t = t.concat(enumerateChildren(f));
+        });
+      });
+
+      var direct_parents = findParents($scope.field.id, $scope.step.children);
+      $scope.all_fields = t.filter(function(f) { return direct_parents.indexOf(f.id) < 0; })
+
+      function enumerateChildren(field) {
+        var c = [];
+        if (angular.isDefined(field.children)) {
+          field.children.forEach(function(field) {
+            c.push(field);
+            c = c.concat(enumerateChildren(field));
+          });
+        }
+        return c;
+      }
+
+      return Utils.openConfirmableModalDialog('views/partials/trigger_field.html', option, $scope);
     };
 
     $scope.assignScorePointsDialog = function(option) {
-      return $scope.openConfirmableModalDialog('views/partials/assign_score_points.html', option, $scope);
+      return Utils.openConfirmableModalDialog('views/partials/assign_score_points.html', option, $scope);
+    };
+  }
+]).
+controller('AdminFieldTemplatesCtrl', ['$scope', 'Utils', 'AdminFieldTemplateResource',
+  function($scope, Utils, AdminFieldTemplateResource) {
+    $scope.fieldResource = AdminFieldTemplateResource;
+
+    $scope.admin.fieldtemplates.$promise.then(function(fields) {
+      $scope.fields = fields;
+    });
+
+    $scope.addField = function(new_field) {
+      $scope.fields.push(new_field);
     };
   }
 ]).
@@ -232,7 +234,7 @@ controller('AdminFieldTemplatesAddCtrl', ['$scope',
     $scope.new_field = {};
 
     $scope.add_field = function() {
-      var field = $scope.admin.new_field_template($scope.field ? $scope.field.id : '');
+      var field = $scope.admin_utils.new_field_template($scope.field ? $scope.field.id : '');
       field.instance = 'template';
       field.label = $scope.new_field.label;
       field.type = $scope.new_field.type;

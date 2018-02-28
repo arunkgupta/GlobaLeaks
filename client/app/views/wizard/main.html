@@ -1,205 +1,226 @@
 <form name="wizardForm" novalidate>
-  <div id="WizardStep1" data-ng-show="step == 1">
-    <div class="row">
-      <div class="col-md-12">
-        <div class="title1" data-translate>Welcome to GlobaLeaks!</div>
-        <div data-translate>The following step by step wizard will guide you through configuring your whistleblowing site.</div>
-      </div>
-    </div>
+  <div data-ng-show="step == 1">
     <div class="row wizard-block">
       <div class="col-md-12">
-        <div class="title3" data-translate>Please choose the primary language of the site:</div>
-        <div id="LanguagePickerBox" class="languagePick alert alert-warning">
-          <select data-ng-model="language" data-ng-options="item.code as item.name for item in languages_enabled_selector | orderBy:'name'" class="form-control"></select>
-        </div>
+        <div class="title1" data-translate>Welcome!</div>
+        <div data-translate>The following step-by-step procedure will guide you through creating your whistleblowing platform.</div>
       </div>
     </div>
     <div class="pager pull-right">
-      <button id="ButtonNext1" class="btn btn-success btn-large" data-ng-click="step=step+1">
+      <button class="ButtonNext btn btn-primary" data-ng-click="step=step+1">
         <span data-translate>next step</span>
         <i class="glyphicon glyphicon-circle-arrow-right"></i>
       </button>
     </div>
   </div>
-  <div id="WizardStep2" data-ng-show="step == 2">
+  <div data-ng-show="step == 2" data-ng-form="wizardFormStep2">
     <div class="row wizard-block">
-      <div class="title" data-translate>General</div>
       <div class="col-md-6">
         <div class="form-group col-md-12">
           <label class="col-md-4">
             <span data-translate>Project name</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
+            <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
           </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.node_name.$error.required}">
-            <input name="node_name" class="form-control" data-ng-model="admin.node.name" data-ng-attr-placeholder="{{'Enter the name for your whistleblowing project' | translate}}" maxlength="{{node.maximum_namesize}}" type="text" required>
+          <div class="col-md-8" data-ng-class="{'has-error': wizardFormStep2.node_name.$error.required}">
+            <input name="node_name" class="form-control" data-ng-model="wizard.node_name" data-ng-attr-placeholder="{{'Project name' | translate}}" type="text" required>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pager pull-right">
+      <button class="ButtonPrevious btn btn-primary" data-ng-click="step=step-1">
+        <i class="glyphicon glyphicon-circle-arrow-left"></i>
+        <span data-translate>previous step</span>
+      </button>
+      <button class="ButtonNext btn btn-primary" data-ng-click="step=step+1" data-ng-disabled="wizardFormStep2.$invalid">
+        <span data-translate>next step</span>
+        <i class="glyphicon glyphicon-circle-arrow-right"></i>
+      </button>
+    </div>
+  </div>
+  <div data-ng-show="step == 'DISABLED'">
+    <div class="row wizard-block">
+      <div class="title" data-translate>Please choose a configuration profile:</div>
+      <div class="col-md-6">
+        <div data-ng-include="'views/wizard/profiles.html'"></div>
+      </div>
+      <div class="col-md-6">
+        <div class="wizard-help-hint">
+          <p data-translate>These profiles contain settings used by successful projects in each respective field.</p>
+        </div>
+      </div>
+    </div>
+    <div class="pager pull-right">
+      <button class="ButtonPrevious btn btn-primary" data-ng-click="step=step-1">
+        <i class="glyphicon glyphicon-circle-arrow-left"></i>
+        <span data-translate>previous step</span>
+      </button>
+      <button class="ButtonNext btn btn-primary" data-ng-click="step=step+1">
+        <span data-translate>next step</span>
+        <i class="glyphicon glyphicon-circle-arrow-right"></i>
+      </button>
+    </div>
+  </div>
+  <div data-ng-show="step == 3" data-ng-form="wizardFormStep4">
+    <div class="row wizard-block">
+      <div class="title" data-translate>Admin</div>
+      <div class="col-md-6">
+        <div class="form-group col-md-12">
+          <label class="col-md-4">
+            <span data-translate>Name</span>
+            <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
+          </label>
+          <div class="col-md-8" data-ng-class="{'has-error': wizardFormStep4.admin_name.$error.required}">
+            <input name="admin_name" class="form-control" data-ng-model="wizard.admin_name" type="text" data-ng-attr-placeholder="{{'Name' | translate}}" required>
           </div>
         </div>
         <div class="form-group col-md-12">
           <label class="col-md-4">
-            <span data-translate>Project description</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
-          </label>
-          <div class="col-md-8"  data-ng-class="{'has-error': wizardForm.node_description.$error.required}">
-            <textarea name="node_description" class="form-control" data-ng-model="admin.node.description" data-ng-attr-placeholder="{{'Give a concise description of your project' | translate}}" maxlength="{{node.maximum_textsize}}" required></textarea>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-6">
-        <p class="wizard-help-hint">
-          <span data-translate>Give your whistleblowing project a good name and description to invite whistleblowers to submit. Be sure to make the goals of your project clear.</span>
-        </p>
-      </div>
-    </div>
-    <div class="row wizard-block">
-      <div class="title" data-translate>Admin</div>
-       <div class="col-md-6">
-         <div class="form-group col-md-12">
-          <label class="col-md-4">
             <span data-translate>Email address</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
+            <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
           </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.admin_email.$error.required || wizardForm.admin_email.$error.pattern}">
-            <input name="admin_email" class="form-control" data-ng-model="admin_mail_address" data-ng-attr-placeholder="{{'Enter an email address for the administrator' | translate}}" maxlength="{{node.maximum_namesize}}" data-ng-pattern="email_regexp" type="text" required>
-            <div class="text-red" data-ng-show="wizardForm.admin_email.$error.pattern">
+          <div class="col-md-8" data-ng-class="{'has-error': wizardFormStep4.admin_email.$error.required || wizardFormStep4.admin_email.$error.pattern}">
+            <input name="admin_email" class="form-control" data-ng-model="wizard.admin_mail_address" data-ng-attr-placeholder="{{'Email address' | translate}}" data-ng-pattern="email_regexp" type="text" required>
+            <div class="text-danger" data-ng-show="wizardFormStep4.admin_email.$error.pattern">
               <span data-translate>Invalid email address</span>
             </div>
           </div>
         </div>
-         <div class="form-group col-md-12">
+        <div class="form-group col-md-12">
           <label class="col-md-4">
             <span data-translate>Password</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
+            <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
           </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.password.$error.required || wizardForm.password.$error.passwordStrength}">
-            <input name="password" class="form-control" data-ng-model="admin_password" type="password" data-ng-attr-placeholder="{{'Enter a password for the administrator' | translate}}" zxcvbn="passwordStrength" zx-min-score="3" required />
+          <div class="col-md-8" data-ng-class="{'has-error': wizardFormStep4.password.$error.required || wizardFormStep4.password.$error.passwordStrength}">
+            <input name="password" class="form-control" data-ng-model="wizard.admin_password" type="password" data-ng-attr-placeholder="{{'Password' | translate}}" autocomplete="off" data-zxcvbn="passwordStrength" data-zx-min-score="3" required />
             <zx-password-meter value="passwordStrength"></zx-password-meter>
+            <div class="text-danger" data-ng-show="!wizardFormStep4.password.$error.required && wizardFormStep4.password.$error.passwordStrength">
+              <p data-translate>The chosen password is too weak. Make it more secure by adding special characters, numbers, and unusual symbols.</p>
+            </div>
           </div>
         </div>
         <div class="form-group col-md-12">
           <label class="col-md-4">
             <span data-translate>Confirm password</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
+            <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
           </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.checkpassword.$error.required || admin_password !== admin_check_password}">
-            <input name="checkpassword" class="form-control" data-ng-model="admin_check_password" type="password" data-ng-attr-placeholder="{{'Please confirm it' | translate}}" required />
-            <div class="text-red" data-ng-show="admin_password !== '' && (admin_password !== admin_check_password)">
-              <span data-translate>The two passwords do not match</span>
-            </div>
+          <div class="col-md-8" data-ng-class="{'has-error': wizardFormStep4.checkpassword.$error.required || wizard.admin_password !== admin_check_password}">
+            <input name="checkpassword" class="form-control" data-ng-model="admin_check_password" type="password" data-ng-attr-placeholder="{{'Password' | translate}}" autocomplete="off" required />
+            <div class="text-danger" data-ng-show="!wizardFormStep4.password.$error.passwordStrength && (wizard.admin_password !== admin_check_password)" data-translate>The two passwords do not match</div>
           </div>
         </div>
       </div>
       <div class="col-md-6">
-        <p class="wizard-help-hint">
-          <span data-translate>The username for accessing the server as the administrator will be 'admin'.</span>
-        </p>
+        <div class="wizard-help-hint">
+          <span data-translate>The default username is:</span>
+          <span class="label label-warning">admin</span>
+        </div>
       </div>
     </div>
+    <div class="pager pull-right">
+      <button class="ButtonPrevious btn btn-primary" data-ng-click="step=step-1">
+        <i class="glyphicon glyphicon-circle-arrow-left"></i>
+        <span data-translate>previous step</span>
+      </button>
+      <button class="ButtonNext btn btn-primary" data-ng-click="step=step+1" data-ng-disabled="wizardFormStep4.$invalid || (wizard.admin_password !== admin_check_password)">
+        <span data-translate>next step</span>
+        <i class="glyphicon glyphicon-circle-arrow-right"></i>
+      </button>
+    </div>
+  </div>
+  <div data-ng-show="step == 4" data-ng-form="wizardFormStep5">
     <div class="row wizard-block">
       <div class="title" data-translate>Recipient</div>
       <div class="col-md-6">
         <div class="form-group col-md-12">
           <label class="col-md-4">
             <span data-translate>Name</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
+            <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
           </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.receiver_name.$error.required}">
-            <input name="receiver_name" class="form-control" data-ng-model="receiver.name" maxlength="{{node.maximum_namesize}}" type="text" data-ng-attr-placeholder="{{'Enter the name of the recipient' | translate}}" required>
+          <div class="col-md-8" data-ng-class="{'has-error': wizardFormStep5.receiver_name.$error.required}">
+            <input name="receiver_name" class="form-control" data-ng-model="wizard.receiver_name" type="text" data-ng-attr-placeholder="{{'Name' | translate}}" required>
           </div>
         </div>
         <div class="form-group col-md-12">
           <label class="col-md-4">
             <span data-translate>Email address</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
+            <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
           </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.receiver_email.$error.required || wizardForm.admin_email.$error.pattern}">
-            <input name="receiver_email" class="form-control" data-ng-model="receiver.mail_address"  maxlength="{{node.maximum_namesize}}" data-ng-pattern="email_regexp" type="text" data-ng-attr-placeholder="{{'Enter the email address used to notify the recipient' | translate}}" required>
-            <div class="text-red" data-ng-show="wizardForm.receiver_email.$error.pattern">
+          <div class="col-md-8" data-ng-class="{'has-error': wizardFormStep5.receiver_email.$error.required || wizardFormStep5.receiver_email.$error.pattern}">
+            <input name="receiver_email" class="form-control" data-ng-model="wizard.receiver_mail_address" data-ng-pattern="email_regexp" type="text" data-ng-attr-placeholder="{{'Email address' | translate}}" required>
+            <div class="text-danger" data-ng-show="wizardFormStep5.receiver_email.$error.pattern">
               <span data-translate>Invalid email address</span>
             </div>
           </div>
         </div>
-        <div class="form-group col-md-12">
-          <label class="col-md-4">
-            <span data-translate>Password</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
-          </label>
-          <div class="col-md-8">
-            <div>
-              <span data-translate>Default user password is:</span>
-              <span class="label label-primary">globaleaks</span>
-            </div>
-          </div>
+      </div>
+      <div class="col-md-6">
+        <div class="wizard-help-hint">
+          <span data-translate>The default username is:</span>
+          <span class="label label-warning">recipient</span>
         </div>
-        <div class="form-group col-md-12">
-          <label class="col-md-4">
-            <span data-translate>PGP key</span>
-            <span class="text-red" data-ng-show="!admin.node.allow_unencrypted" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
-          </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.pgpkey.$error.required}">
-            <textarea name="pgpkey" class="form-control" data-ng-attr-placeholder="{{'Copy and paste the PGP public key here' | translate}}" data-ng-model="receiver.pgp_key_public" data-ng-required="!admin.node.allow_unencrypted"></textarea>
-            <input data-ng-model="admin.node.allow_unencrypted" data-ng-click="open_modal_allow_unencrypted()" type="checkbox" data-ng-change="receiver.pgp_key_public = admin.node.allow_unencrypted ? '' : receiver.pgp_key_public">
-            <span data-translate>Enable insecure configuration without PGP encryption.</span>
-            <div data-ng-show="admin.node.allow_unencrypted">
-              <span class="label label-danger" data-translate>Danger</span>
-              <span data-translate>By enabling this option, the system will be storing the submitted files unencrypted on your server.</span>
-              <span data-translate>This happens whenever encryption is unavailable.</span>
-            </div>
-          </div>
+        <div class="wizard-help-hint">
+          <span data-translate>The default password is:</span>
+          <span class="label label-warning">recipient</span>
         </div>
-      </div>
-      <div class="col-md-6">
-        <p class="wizard-help-hint">
-          <span data-translate>Recipients are very important for a whistleblowing project. They are the people responsible for receiving the whistleblowers' submissions, verifying their authenticity and for taking action too. Choose them wisely.</span>
-        </p>
-      </div>
-      <div class="col-md-6">
-        <p class="wizard-help-hint">
-          <span data-translate>In order to deliver encrypted emails and files each recipient needs an associated PGP key. Cut and paste the key of the recipient or mark the checkbox:</span>
-          <span data-translate>Enable insecure configuration without PGP encryption.</span>
-        </p>
-      </div>
-    </div>
-    <div class="row wizard-block">
-      <div class="title" data-translate>Context</div>
-      <div class="col-md-6">
-        <div class="form-group col-md-12">
-          <label class="col-md-4">
-            <span data-translate>Name</span>
-            <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
-          </label>
-          <div class="col-md-8" data-ng-class="{'has-error': wizardForm.context_name.$error.required}">
-            <input name="context_name" class="form-control" data-ng-model="context.name" type="text" data-ng-attr-placeholder="{{'What is the topic of your whistleblowing project?' | translate}}" required>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-6">
-        <p class="wizard-help-hint">
-          <span data-translate>Contexts are the categories to be selected by whistleblowers, when they perform their submission. Make sure to make them pertinent to your project.</span>
-        </p>
       </div>
     </div>
     <div class="pager pull-right">
-      <button id="ButtonPrevious1" class="btn btn-success btn-large" data-ng-click="step=step-1">
+      <button class="ButtonPrevious btn btn-primary" data-ng-click="step=step-1">
         <i class="glyphicon glyphicon-circle-arrow-left"></i>
         <span data-translate>previous step</span>
       </button>
-      <button id="ButtonNext2" class="btn btn-success btn-large" data-ng-click="step=step+1" data-ng-disabled="wizardForm.$invalid || (!admin.node.allow_unencrypted && !receiver.pgp_key_public) || (admin_password !== admin_check_password)">
+      <button class="ButtonNext btn btn-primary" data-ng-click="step=step+1" data-ng-disabled="wizardFormStep5.$invalid">
         <span data-translate>next step</span>
         <i class="glyphicon glyphicon-circle-arrow-right"></i>
       </button>
     </div>
   </div>
-  <div id="WizardStep3" class="row" data-ng-show="step == 3">
-    <div class="col-md-10">
-      <div class="congratulations">
-        <div class="title1" data-translate>Congratulations!</div>
-        <div data-translate>You have succesfully completed the platform wizard. You are now ready to further tweak the platform with the admin interface.</div>
+  <div data-ng-show="step == 5" data-ng-form="wizardFormStep6">
+    <div class="row wizard-block">
+      <div class="form-group col-md-12">
+        <div class="title1" data-translate>License Agreement</div>
+        <div class="" data-translate>Please review the license terms before proceeding.</div>
+        <div>
+          <pre id='wizardLicense' class="license" data-ng-include="'license.txt'"></pre>
+          <div>
+            <label>
+              <input name="tosAccept" class="inputelem" type="checkbox" data-ng-required="true" data-ng-model="tosAccept"/>
+              <span class="tos-agreement" data-translate>I have read and agree to the terms of the License Agreement.</span>
+            </label>
+          </div>
+          <div>
+            <label>
+              <input data-ng-model="wizard.enable_developers_exception_notification" type="checkbox">
+              <span data-translate>Notify developers of software problems</span>
+            </label>
+          </div>
+          <div data-translate>By enabling this feature, you will contribute to the development and security of the platform.</div>
+        </div>
       </div>
     </div>
     <div class="pager pull-right">
-      <button id="ButtonNext3" class="btn btn-success btn-large" data-ng-click="finish()" type="submit">
-        <span data-translate>Go to admin interface</span>
+      <button class="ButtonPrevious btn btn-primary" data-ng-click="step=step-1">
+        <i class="glyphicon glyphicon-circle-arrow-left"></i>
+        <span data-translate>previous step</span>
       </button>
+      <button class="ButtonNext btn btn-primary" data-ng-click="complete()" data-ng-disabled="wizardFormStep6.$invalid">
+        <span data-translate>next step</span>
+        <i class="glyphicon glyphicon-circle-arrow-right"></i>
+      </button>
+    </div>
+  </div>
+  <div data-ng-show="step == 6">
+    <div class="row wizard-block">
+      <div class="col-md-10">
+        <div class="congratulations">
+          <div class="title1" data-translate>Congratulations!</div>
+          <div data-translate>You have completed the platform wizard.</div>
+        </div>
+      </div>
+    </div>
+    <div class="pager pull-right">
+      <button class="ButtonNext btn btn-primary" data-ng-click="goToAdminInterface()" type="submit"><i class="glyphicon glyphicon-link"></i> <span data-translate>Administration interface</span></button>
     </div>
   </div>
 </form>

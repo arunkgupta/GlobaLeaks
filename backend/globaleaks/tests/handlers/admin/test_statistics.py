@@ -2,59 +2,35 @@
 from twisted.internet.defer import inlineCallbacks
 
 from globaleaks import anomaly
-from globaleaks.orm import transact_ro
 from globaleaks.handlers.admin import statistics
-from globaleaks.jobs.statistics_sched import AnomaliesSchedule, StatisticsSchedule
+from globaleaks.jobs.anomalies import Anomalies
+from globaleaks.jobs.statistics import Statistics
 from globaleaks.models import Stats
+from globaleaks.orm import transact
 from globaleaks.tests import helpers
-from globaleaks.tests.test_anomaly import pollute_events_for_testing, \
-    pollute_events_for_testing_and_perform_synthesis
 
 
 class TestStatsCollection(helpers.TestHandler):
     _handler = statistics.StatsCollection
 
-    @transact_ro
-    def get_stats_count(self, store):
-        return store.find(Stats).count()
-
     @inlineCallbacks
     def test_get(self):
         handler = self.request({}, role='admin')
-        yield handler.get(0)
+        response = yield handler.get(0)
 
-        self.assertTrue(isinstance(self.responses, list))
-        self.assertEqual(len(self.responses[0]), 3)
-        self.assertEqual(len(self.responses[0]['heatmap']), 7 * 24)
+        self.assertEqual(len(response), 3)
+        self.assertEqual(len(response['heatmap']), 7 * 24)
 
-        pollute_events_for_testing_and_perform_synthesis(10)
+        self.pollute_events(10)
 
-        yield AnomaliesSchedule().operation()
-        yield StatisticsSchedule().operation()
+        yield Anomalies().run()
+        yield Statistics().run()
 
-        for i in range(0, 2):
+        for i in range(2):
             handler = self.request({}, role='admin')
-            yield handler.get(i)
-            self.assertEqual(len(self.responses[1 + i]), 3)
-            self.assertEqual(len(self.responses[1 + i]['heatmap']), 7 * 24)
-
-    @inlineCallbacks
-    def test_delete(self):
-        pollute_events_for_testing_and_perform_synthesis(10)
-        yield AnomaliesSchedule().operation()
-        yield StatisticsSchedule().operation()
-
-        # be sure that Stats is populated
-        count = yield self.get_stats_count()
-        self.assertEqual(count, 1)
-
-        # delete stats
-        handler = self.request({}, role='admin')
-        yield handler.delete()
-
-        # verify that stats are now empty
-        count = yield self.get_stats_count()
-        self.assertEqual(count, 0)
+            response = yield handler.get(i)
+            self.assertEqual(len(response), 3)
+            self.assertEqual(len(response['heatmap']), 7 * 24)
 
 
 class TestAnomalyCollection(helpers.TestHandler):
@@ -62,41 +38,17 @@ class TestAnomalyCollection(helpers.TestHandler):
 
     @inlineCallbacks
     def test_get(self):
-        pollute_events_for_testing_and_perform_synthesis(10)
-        yield AnomaliesSchedule().operation()
-        yield StatisticsSchedule().operation()
+        self.pollute_events(10)
+
+        yield Anomalies().run()
+        yield Statistics().run()
 
         handler = self.request({}, role='admin')
-        yield handler.get()
-
-        self.assertTrue(isinstance(self.responses, list))
-        self.assertEqual(len(self.responses), 1)
-
-    @inlineCallbacks
-    def test_delete(self):
-        pollute_events_for_testing_and_perform_synthesis(10)
-        yield AnomaliesSchedule().operation()
-        yield StatisticsSchedule().operation()
+        response = yield handler.get()
 
         # be sure that AnomalyHistory is populated
-        handler = self.request({}, role='admin')
-        yield handler.get()
-        self.assertEqual(len(self.responses), 1)
-        self.assertTrue(isinstance(self.responses, list))
-
-        self.responses = []
-
-        # delete stats
-        handler = self.request({}, role='admin')
-        yield handler.delete()
-
-        self.responses = []
-
-        # test that AnomalyHistory is not populated anymore
-        handler = self.request({}, role='admin')
-        yield handler.get()
-        self.assertEqual(len(self.responses), 0)
-        self.assertTrue(isinstance(self.responses, list))
+        self.assertTrue(isinstance(response, list))
+        self.assertEqual(len(response), 1)
 
 
 class TestRecentEventsCollection(helpers.TestHandler):
@@ -104,20 +56,33 @@ class TestRecentEventsCollection(helpers.TestHandler):
 
     @inlineCallbacks
     def test_get(self):
-        pollute_events_for_testing_and_perform_synthesis(3)
-        yield StatisticsSchedule().operation()
+        self.pollute_events(3)
+
+        yield Statistics().run()
 
         handler = self.request({}, role='admin')
 
-        yield handler.get('details')
-        yield handler.get('summary')
-
-        self.assertTrue(isinstance(self.responses[0], list))
-        self.assertTrue(isinstance(self.responses[1], dict))
+        response = yield handler.get('details')
+        self.assertTrue(isinstance(response, list))
 
         for k in ['id', 'duration', 'event', 'creation_date']:
-            for elem in self.responses[0]:
+            for elem in response:
                 self.assertTrue(k in elem)
 
-        for k in anomaly.ANOMALY_MAP.keys():
-            self.assertTrue(k in self.responses[1])
+        response = yield handler.get('summary')
+        self.assertTrue(isinstance(response, dict))
+
+        for k in anomaly.ANOMALY_MAP:
+            self.assertTrue(k in response)
+
+
+class TestJobsTiming(helpers.TestHandler):
+    _handler = statistics.JobsTiming
+
+    @inlineCallbacks
+    def test_get(self):
+        # TODO: start job mocking the reactor
+
+        handler = self.request({}, role='admin')
+
+        yield handler.get()

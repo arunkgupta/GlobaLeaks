@@ -1,33 +1,27 @@
 <div id="HomePageBox">
-  <div id="NodeIntro">
-    <div id="NodeIntroPresentation" data-ng-if="node.presentation">{{::node.presentation}}</div>
-    <div id="NodeIntroDescription" data-ng-if="node.description">{{::node.description}}</div>
-  </div>
+  <div id="NodeIntro" data-ng-if="node.presentation">{{::node.presentation}}</div>
 
   <div id="WhistleblowerBox" class="row">
     <div data-ng-show="node.configured">
-      <div id="WhistleblowerSubmitBoxButton" class="row" data-ng-show="node.disable_submissions || !node.accept_submissions || (!node.tor2web_whistleblower && !anonymous)">
+      <div id="WhistleblowerSubmitBoxButton" class="row" data-ng-show="node.disable_submissions || !node.accept_submissions || (!node.https_whistleblower && !connection.tor)">
         <button class="btn btn-danger disabled">
           <i class="glyphicon glyphicon-ban-circle"></i>
-          <span data-translate>Whistleblowing disabled</span>
+          <span data-translate>Submissions disabled</span>
         </button>
       </div>
-      <div class="row" data-ng-show="!node.tor2web_whistleblower && !anonymous">
-        <p class="text-red" data-translate>You are connecting to the server without anonymity and this server supports only anonymous submissions</p>
+      <div class="row" data-ng-show="!node.https_whistleblower && !connection.tor">
+        <p class="text-danger" data-translate>You are connecting to the server without anonymity and this server supports only anonymous submissions</p>
       </div>
       <div class="row" data-ng-show="!node.accept_submissions">
-        <p class="text-red">
+        <p class="text-danger">
           <span data-translate>Server temporarly unusable due to resource exhaustion; advise the Admin if you can.</span>
         </p>
       </div>
-      <div class="row" data-ng-show="!node.disable_submissions && node.accept_submissions && (node.tor2web_whistleblower || anonymous)">
+      <div class="row" data-ng-show="!node.disable_submissions && node.accept_submissions && (node.https_whistleblower || connection.tor)">
         <div id="WhistleblowerSubmitBox">
           <div id="WhistleblowerSubmitBoxHeader">{{::node.whistleblowing_question}}</div>
           <div id="WhistleblowerSubmitBoxButton">
-            <button data-ng-click="goToSubmission()" class="btn btn-primary">
-              <i class="glyphicon glyphicon-bullhorn"></i>
-              <span>{{::node.whistleblowing_button}}</span>
-            </button>
+            <button data-ng-click="evaluateAnonimityModalOpening() || Utils.go('/submission')" class="btn btn-primary">{{::node.whistleblowing_button}}</button>
           </div>
         </div>
         <div id="WhistleblowerReceiptBox" class="center-block" data-ng-include="'views/partials/wb_login_box.html'"></div>
@@ -39,12 +33,11 @@
     </div>
   </div>
 
-  <div id="GlobaleaksInfoBox" class="row" data-ng-if="!node.disable_donation_panel">
+  <div id="DonationPanel" class="row" data-ng-if="!node.disable_donation_panel">
     <div class="col-md-12">
       <span data-translate>This platform makes use of GlobaLeaks software specifically designed to protect the identity for submitter and recipient in the exchange of content.</span><br />
       <span data-translate>The software is developed by the non-profit Hermes Center for Transparency and Digital Human Rights.</span>
-      <a href="http://logioshermes.org/home/about-mission/support-us/" target="_blank" rel="noreferrer"><span data-translate>Please support Hermes through their donation page.</span></a>
-      </p>
+      <a href="https://www.globaleaks.org/donate/" target="_blank" rel="noreferrer noopener"><span data-translate>Please support Hermes through their donation page.</span></a>
     </div>
   </div>
 </div>

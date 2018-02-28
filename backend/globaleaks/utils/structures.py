@@ -1,14 +1,13 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #   structures
 #   **********
 #
 # This file contains the complex structures stored in Storm table
 # in order to checks integrity between exclusive options, provide defaults,
 # supports extensions (without changing DB format)
-import copy
 
 from globaleaks.models import Model
-from globaleaks.settings import GLSettings
+from globaleaks.state import State
 
 
 # Localized strings utility management
@@ -24,7 +23,7 @@ class Rosetta(object):
         self._localized_strings = {}
         self._localized_keys = keys
 
-    def acquire_storm_object(self, obj):
+    def acquire_orm_object(self, obj):
         self._localized_strings = {key: getattr(obj, key) for key in self._localized_keys}
 
     def acquire_multilang_dict(self, obj):
@@ -35,13 +34,14 @@ class Rosetta(object):
 
     def singlelang_to_multilang_dict(self, obj, language):
         ret = {}
+
         for key in self._localized_keys:
-            value = {language: obj[key]} if key in obj else {language: ''}
-            ret[key] = value
+            ret[key] = {language: obj[key]} if key in obj else {language: ''}
+
         return ret
 
     def dump_localized_key(self, key, language):
-        default_language = GLSettings.memory_copy.default_language
+        default_language = State.tenant_cache[1].default_language
 
         if key not in self._localized_strings:
             return ""
@@ -77,7 +77,7 @@ def get_localized_values(dictionary, obj, keys, language):
     if isinstance(obj, dict):
         mo.acquire_multilang_dict(obj)
     elif isinstance(obj, Model):
-        mo.acquire_storm_object(obj)
+        mo.acquire_orm_object(obj)
 
     if language is not None:
         dictionary.update({key: mo.dump_localized_key(key, language) for key in keys})
@@ -87,12 +87,3 @@ def get_localized_values(dictionary, obj, keys, language):
             dictionary.update({key: value})
 
     return dictionary
-
-
-def get_raw_request_format(request, localized_strings):
-    ret = copy.deepcopy(request)
-
-    for ls in localized_strings:
-        ret[ls] = dict
-
-    return ret

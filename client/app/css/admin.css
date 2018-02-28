@@ -8,8 +8,8 @@
   border: 1px solid #CCC;
   border-radius: 3px;
   padding: 16px;
-  margin-top: 20px;
-  margin-bottom: 5px;
+  margin-top: 1em;
+  margin-bottom: 0.2em;
 }
 
 #StepAddBox, #StepsEditBox, #FieldsEditBox, #ContextAdvancedSettingsBox {
@@ -21,10 +21,6 @@
   margin-bottom: 0.8em;
 }
 
-.addFieldButton {
-  vertical-align: bottom;
-}
-
 .fileDetails {
   margin: 0 0 0.8em 20px;
 }
@@ -33,18 +29,6 @@
   position: relative;
   border: 1px solid rgb(204, 204, 204);
   margin-bottom: 20px;
-}
-
-.fieldLabel {
-  margin-top: 20px;
-}
-
-.stepEditorHeader, .fieldEditorHeader {
-  padding: 20px;
-}
-
-.stepEditor, .fieldEditor {
-  padding-top: 20px;
 }
 
 .editorHeader {
@@ -72,12 +56,9 @@
 
 .selectionList {
   background-color: #fff;
-  padding: 1em;
+  padding-top: 1em;
+  padding-bottom: 1em;
   border: 1px solid #cccccc;
-}
-
-.selectionList .row {
-  margin-left: 0;
 }
 
 .selectionContextItem .checkbox {
@@ -87,15 +68,36 @@
   left: -40px;
 }
 
-.bordered {
-  stroke: #FFFFFF;
-  stroke-width: 2px;
-}
-
 text.axis-workweek {
   fill: #000;
 }
 
 text.axis-worktime {
   fill: #000;
+}
+
+.license, .changelogmsg {
+  white-space: pre-line;
+  width: 87ch;
+}
+
+#wizardLicense {
+  max-height: 400px;
+  overflow-y: scroll;
+}
+
+.default-language, .non-default-language {
+  color: #337ab7;
+}
+
+.non-default-language, .disabled-icon {
+  opacity: 0.2;
+}
+
+.non-default-language:hover {
+  opacity: 1;
+}
+
+.selectionList {
+  list-style-type: none;
 }

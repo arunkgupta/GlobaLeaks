@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-from twisted.internet.defer import inlineCallbacks
-
-from globaleaks.tests import helpers
 from globaleaks.handlers import exception
+from globaleaks.tests import helpers
+from twisted.internet.defer import inlineCallbacks
 
 
 class TestExceptionHandler(helpers.TestHandler):
@@ -19,4 +18,4 @@ class TestExceptionHandler(helpers.TestHandler):
 
         handler = self.request(exception_data)
         yield handler.post()
-        self.assertEqual(handler.get_status(), 201)
+        self.assertEqual(handler.request.code, 200)

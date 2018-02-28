@@ -2,6 +2,10 @@
 # This is the post installation script for globaleaks
 set -e
 
+if which pycompile >/dev/null 2>&1; then
+  pycompile -p globaleaks
+fi
+
 CHECK_PIP_VERSION="
 import pip
 from pkg_resources import parse_version as v
@@ -11,14 +15,18 @@ exit(v(pip.__version__) < v('1.3'))
 DISTRO="unknown"
 DISTRO_CODENAME="unknown"
 if which lsb_release >/dev/null; then
-  DISTRO="$( lsb_release -is )"
-  DISTRO_CODENAME="$( lsb_release -cs )"
+  DISTRO="$(lsb_release -is)"
+  DISTRO_CODENAME="$(lsb_release -cs)"
 fi
 
-PIP_NEEDED=1
-if [ "$DISTRO_CODENAME" = "jessie" ]; then
-  # debian jessie is currently the only one with all the dependencies
-  PIP_NEEDED=0
+if [ "$DISTRO" = "LinuxMint" ]; then
+  DISTRO="Ubuntu"
+  DISTRO_CODENAME=`grep UBUNTU_CODENAME /etc/os-release | sed -e 's/UBUNTU_CODENAME=//'`
+fi
+
+PIP_NEEDED=0
+if echo "$DISTRO_CODENAME" | grep -qE "^(precise)|(trusty|jessie)$"; then
+  PIP_NEEDED=1
 fi
 
 if [ $PIP_NEEDED -eq 1 ]; then
@@ -32,47 +40,33 @@ if [ $PIP_NEEDED -eq 1 ]; then
   pip install -r /usr/share/globaleaks/requirements.txt
 fi
 
+# Create globaleaks user and add the user to required groups
 if ! id -u globaleaks >/dev/null 2>&1; then
-  useradd globaleaks -b /var/globaleaks/ -s /bin/false
+  adduser --quiet \
+          --system \
+          --disabled-login \
+          --disabled-password \
+          --home /var/globaleaks \
+          --shell /bin/false \
+          --group \
+          globaleaks
 fi
 
-if [ ! -h /etc/apparmor.d/usr.sbin.tor ]; then
-  ln -s /etc/apparmor.d/system_tor /etc/apparmor.d/usr.sbin.tor
-fi
+usermod -a -G debian-tor globaleaks
 
-if ! $(grep -q -i globaleaks /etc/apparmor.d/local/system_tor); then
-  echo "/var/globaleaks/torhs/ w," >> /etc/apparmor.d/local/system_tor
-  echo "/var/globaleaks/torhs/** rwk," >> /etc/apparmor.d/local/system_tor
-fi
-
-# XXX. This should be handled directly inside GlobaLeaks, in order to have a
-# fair control over errors, conflicting preferences, etc.
-if ! $(grep -q -i globaleaks /etc/tor/torrc); then
-    cat <<EOF >> /etc/tor/torrc
-# BEGIN GlobaLeaks Configuration - DO NOT EDIT!
-VirtualAddrNetwork 10.23.47.0/10
-AutomapHostsOnResolve 1
-TransPort 9040
-TransListenAddress 127.0.0.1
-DNSPort 5353
-DNSListenAddress 127.0.0.1
-HiddenServiceDir /var/globaleaks/torhs/
-HiddenServicePort 80 127.0.0.1:8082
-# END GlobaLeaks Configuration - DO NOT EDIT!
-EOF
-fi
-
-# Create globaleaks and tor hidden service directories with proper permissions.
+# Create globaleaks service directories with proper permissios
 gl-fix-permissions
 
-# restart apparmor service in order to load tor and globaleaks rules
-service apparmor restart
+# Remove old configuration of Tor used before txtorcon adoption
+if $(grep -q -i globaleaks /etc/tor/torrc >/dev/null 2>&1); then
+  sed -i '/BEGIN GlobaLeaks/,/END GlobaLeaks/d' /etc/tor/torrc
+  service tor restart
+fi
 
-# raise havege default water mark to 4096 bits
+# raise haveged default water mark to 4067 bits
+# for the reason for the 4067 bits see:
+#   - https://github.com/globaleaks/GlobaLeaks/issues/1722
 sed -i 's/DAEMON_ARGS="-w 1024"/DAEMON_ARGS="-w 4067"/g' /etc/default/haveged
 service haveged restart
-
-# Restart tor so that it would use the new configuration and generate the hidden service
-service tor restart
 
 #DEBHELPER#

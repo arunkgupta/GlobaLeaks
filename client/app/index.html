@@ -1,19 +1,18 @@
 <!doctype html>
-<html data-ng-app="GLClient" data-ng-controller="MainCtrl" data-ng-keydown="keypress($event)" data-ng-strict-di>
+<html data-ng-app="GLClient" data-ng-keydown="keypress($event)" data-ng-strict-di lang="{{GLTranslate.indirect.appLanguage}}">
   <head>
-    <title data-ng-bind="node.name">GlobaLeaks</title>
+    <title data-ng-bind="pt"></title>
     <meta charset="utf-8" />
-    <meta name="description" content="" />
+    <meta name="description" content="" data-ng-attr-content="{{node.description}}" />
     <meta name="viewport" content="width=device-width, user-scalable=no" />
     <meta name="referrer" content="never" />
 
-    <!-- Ticket #1480 : Specify the ordered IE support starting from EDGE and ending with 9 -->
-    <meta http-equiv="X-UA-Compatible" content="IE=EDGE,11,10,9" />
-
-    <link rel="icon" href="inlinefiles/favicon.ico" type="image/x-icon">
+    <!-- Ticket #1480 : Specify the ordered IE support starting from EDGE and ending with 11 -->
+    <meta http-equiv="X-UA-Compatible" content="IE=EDGE,11" />
 
     <!-- build:css css/styles.css -->
-    <link rel="stylesheet" href="components/bootstrap-inline-rtl/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="css/bootstrap.css" />
+    <link rel="stylesheet" href="css/select.min.css" />
     <link rel="stylesheet" href="css/main.css" />
     <link rel="stylesheet" href="css/admin.css" />
     <link rel="stylesheet" href="css/home.css" />
@@ -21,43 +20,54 @@
     <link rel="stylesheet" href="css/tip.css" />
     <!-- endbuild -->
 
-    <link rel="stylesheet" data-ng-href="data:text/css;base64,{{node.css}}" />
+    <link id="favicon" rel="shortcut icon" href="data:image/x-icon;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQEAYAAABPYyMiAAAABmJLR0T///////8JWPfcAAAACXBIWXMAAABIAAAASABGyWs+AAAAF0lEQVRIx2NgGAWjYBSMglEwCkbBSAcACBAAAeaR9cIAAAAASUVORK5CYII=" type="image/x-icon" />
+
+    <link data-ng-if="::node.css" rel="stylesheet" data-ng-href="data:text/css;base64,{{node.css}}" />
   </head>
 
   <body>
     <style type="text/css">
-      #LoadingOverlay {
+      .block-user-input {
+        pointer-events: none;
+        user-select: none;
+      }
+
+      #BrowserNotSupported {
+        display: none;
+        padding: 30px;
+      }
+
+      #PageOverlay {
         position: fixed;
         width: 100%;
-        height:100%;
+        height: 100%;
+        top: 0;
         display: flex;
         align-items: center;
-        top: 0;
-        z-index: 2147483647;
         text-align: center;
+        z-index: 2147483647;
+        pointer-events: none;
+        user-select: none;
       }
 
       #LoaderBox {
         position: relative;
         margin: 0 auto;
-        width: 30%;
-        height: 30%;
+        padding: 2em;
         display: flex;
         align-items: center;
-        font-size: 48px;
+        font-size: 2em;
+        font-family: "Helvetica Neue", Helvetica,Arial, sans-serif;
+        color: #555;
         background-color: #FFF;
-        border: 1px solid #DDD;
-        border-radius: 10px 10px 10px 10px;
-        -moz-border-radius: 10px 10px 10px 10px;
-        -webkit-border-radius: 10px 10px 10px 10px;
+        border: 0.1em solid #EEE;
+        border-radius: 0.7em;
+        -moz-border-radius: 0.7em;
+        -webkit-border-radius: 0.7em;
       }
 
       #LoaderBoxContent {
         margin: 0 auto;
-        font-family: "Helvetica Neue", Helvetica,Arial, sans-serif;
-        font-size: 48px;
-        color: #555;
-        background-color: #FFF;
       }
 
       .gly-spin {
@@ -87,53 +97,43 @@
         }
       }
 
-      [ng\:cloak], [ng-cloak], [ng-cloak], [x-ng-cloak], .ng-cloak, .x-ng-cloak {
+      [ng\:cloak], [ng-cloak], [data-ng-cloak], [x-ng-cloak], .ng-cloak, .x-ng-cloak {
         display: none !important;
-      }
-
-      .preload_error {
-        margin: 0 auto;
-        padding: 30px;
       }
     </style>
 
     <noscript>
-      <div class="preload_error">
-        <h1>Error! :(</h1>
-        <br /><br />
-        <p>
-          Your browser is not running Javascript that is required to
-          use the whistleblowing client.<br /><br />
+      <h1>Error! :(</h1>
+      <br /><br />
+      <p>
+        Your browser is not running Javascript that is required to
+        use the whistleblowing client.<br /><br />
 
-          It's common believe that Javascript and security don't sound
-          well together, for this reason we suggest to use the Tor Browser,
-          an extremely tuned FireFox browser with Tor integrated.
+        It's common believe that Javascript and security don't sound
+        well together, for this reason we suggest to use the Tor Browser,
+        an extremely tuned FireFox browser with Tor integrated.
 
-          Here you can found and download the latest release of:
-          <a href="https://www.torproject.us/projects/torbrowser.html">Tor Browser</a>.
-        </p>
-      </div>
+        Here you can download the latest release of the
+        <a href="https://www.torproject.org/download/download-easy.html.en">Tor Browser</a>.
+      </p>
     </noscript>
 
-    <div id="BrowserNotSupported" class="preload_error" style="display: none">
+    <div id="BrowserNotSupported">
       <div>
         <h1>[EN] Warning! :(</h1><br /><br />
         <div>
-          You are running an unsupported (and potentially vulnerable) browser.<br /><br />
-          You are strongly advised to download and install the
-          <a href="https://www.torproject.us/projects/torbrowser.html">Tor Browser</a>
-          to securely and anonymously access this whistleblowing platform.<br />
-
-          The following is the list of the other supported browsers:<br />
+          You are running an unsupported and potentially vulnerable browser.<br /><br />
+          You are strongly advised to download and install the Tor Browser.<br/>
+          The Tor Browser includes various privacy and security enhancements not present in other browsers.<br /><br />
+          <a href="https://www.torproject.org/download/download-easy.html.en" target="_blank" rel="noreferrer noopener" class="text-center">[ Download the Tor Browser ]</a><br /><br />
+          This is the list of the other supported browsers:<br />
           <ul>
-            <li>Mozilla Firefox &gt;= 21</li>
-            <li>Google Chrome &gt;= 11</li>
-            <li>Safari: &gt;= 6.1</li>
+            <li>Mozilla Firefox &gt;= 34</li>
+            <li>Google Chrome &gt;= 37</li>
+            <li>Safari: &gt;= 7.1</li>
             <li>Edge: &gt;= 12</li>
             <li>Internet Explorer &gt;= 11</li>
           </ul>
-
-          Please note that the above browers, even if supported, does not benefit of the same high anonimity guarantees of the Tor Browser.
         </div>
       </div>
       <br /><br />
@@ -141,69 +141,76 @@
         <h1>[IT] Attenzione! :(</h1><br /><br />
         <div>
           Il browser in uso non è supportato ed è potenzialmente vulnerabile.<br /><br />
-          Si invita caldamente a scaricare ed installare il
-          <a href="https://www.torproject.us/projects/torbrowser.html">Tor Browser</a>
-          al fine di accedere a questa piattaforma di whistleblowing in modo sicuro ed anonimo.<br />
-
-          La  seguente è  la lista degli altri browser supportati:<br />
+          Si invita caldamente a scaricare ed installare il Tor Browser.<br />
+          Il Tor Browser include varie migliorie alla privacy a alla sicurezza non presenti in altri browser.<br /><br />
+          <a href="https://www.torproject.org/download/download-easy.html.en" target="_blank" rel="noreferrer noopener" class="text-center">[ Download the Tor Browser ]</a><br /><br />
+          La  seguente è la lista degli altri browser supportati:<br />
           <ul>
-            <li>Mozilla Firefox &gt;= 21</li>
-            <li>Google Chrome &gt;= 11</li>
-            <li>Safari: &gt;= 6.1</li>
+            <li>Mozilla Firefox &gt;= 34</li>
+            <li>Google Chrome &gt;= 37</li>
+            <li>Safari: &gt;= 7.1</li>
             <li>Edge: &gt;= 12</li>
             <li>Internet Explorer &gt;= 11</li>
           </ul>
-
-          Si prega di notare che i browser sopra citati, anche se supportati, non beneficiano delle stesse garanzie di anonimato e sicurezza offerte dal Tor Browser.
         </div>
       </div>
     </div>
 
-    <div id="BrowserSupported">
-      <div id="LoadingOverlay"  data-ng-hide="started && !showLoadingPanel">
-        <div id="LoaderBox" class="ng-cloak">
+    <div id="BrowserSupported" class="ng-cloak" data-ng-class="{'block-user-input': showLoadingPanel}">
+      <div data-ng-if="started" data-ng-class="Utils.classExtension()">
+        <div id="PrivacyBadgeBox" data-ng-if="Utils.showPrivacyBadge()" data-ng-include="'views/partials/privacybadge.html'"></div>
+        <div id="HeaderBox" data-ng-if="!embedded" data-ng-include="'views/partials/header.html'"></div>
+        <div id="MessagesConsoleBox" data-ng-include="'views/partials/messageconsole.html'"></div>
+        <div id="ContentBox" class="container-fluid">
+          <a id="top"></a>
+          <div data-ng-view=""></div>
+        </div>
+        <div id="FooterBox" data-ng-if="!embedded" data-ng-include="'views/partials/footer.html'"></div>
+      </div>
+
+      <div id="PageOverlay" data-ng-hide="started && !showLoadingPanel">
+        <div id="LoaderBox">
           <div id="LoaderBoxContent">
             <div class="glyphicon glyphicon-cog gly-spin"></div>
-            <div data-translate>Loading…</div>
+            <div data-translate>Loading</div>
           </div>
         </div>
       </div>
-
-      <!-- this is resolved by angular-js only at the end of the startup (js loading) -->
-      <div data-ng-if="started" class="ng-cloak" data-ng-include="'app.html'"></div>
     </div>
 
     <!-- build:js js/scripts.js -->
-    <script src="components/js-polyfills/typedarray.js"></script>
-    <script src="components/es6-promise/promise.min.js"></script>
-    <script src="components/stacktrace-js/dist/stacktrace.min.js"></script>
-    <script src="components/scrypt-async/scrypt-async.min.js"></script>
-    <script src="components/openpgp/dist/openpgp.min.js"></script>
-    <script src="components/jquery/dist/jquery.min.js"></script>
-    <script src="components/angular/angular.min.js"></script>
-    <script src="components/angular-aria/angular-aria.min.js"></script>
-    <script src="components/angular-filter/dist/angular-filter.min.js"></script>
-    <script src="components/angular-resource/angular-resource.min.js"></script>
-    <script src="components/angular-route/angular-route.min.js"></script>
-    <script src="components/angular-translate/angular-translate.min.js"></script>
-    <script src="components/angular-translate-loader-url/angular-translate-loader-url.min.js"></script>
-    <script src="components/angular-translate-loader-static-files/angular-translate-loader-static-files.min.js"></script>
-    <script src="components/angular-ui-bootstrap-bower/ui-bootstrap-tpls.min.js"></script>
-    <script src="components/d3/d3.min.js"></script>
-    <script src="components/flow.js/dist/flow.min.js"></script>
-    <script src="components/fusty-flow.js/src/fusty-flow.js"></script>
-    <script src="components/fusty-flow.js/src/fusty-flow-factory.js"></script>
-    <script src="components/ng-flow/dist/ng-flow.min.js"></script>
-    <script src="components/zxcvbn/dist/zxcvbn.js"></script>
-    <script src="components/angular-zxcvbn/dist/angular-zxcvbn.js"></script>
+    <script src="js/lib/stacktrace.min.js"></script>
+    <script src="js/lib/scrypt-async.min.js"></script>
+    <script src="js/lib/openpgp.min.js"></script>
+    <script src="js/lib/angular.min.js"></script>
+    <script src="js/lib/angular-aria.min.js"></script>
+    <script src="js/lib/angular-filter.min.js"></script>
+    <script src="js/lib/angular-resource.min.js"></script>
+    <script src="js/lib/angular-route.min.js"></script>
+    <script src="js/lib/angular-sanitize.min.js"></script>
+    <script src="js/lib/angular-translate.min.js"></script>
+    <script src="js/lib/angular-translate-loader-url.min.js"></script>
+    <script src="js/lib/angular-translate-loader-static-files.min.js"></script>
+    <script src="js/lib/ui-bootstrap-tpls.js"></script>
+    <script src="js/lib/d3.min.js"></script>
+    <script src="js/lib/FileSaver.js"></script>
+    <script src="js/lib/angular-file-saver.min.js"></script>
+    <script src="js/lib/flow.min.js"></script>
+    <script src="js/lib/ng-flow.min.js"></script>
+    <script src="js/lib/zxcvbn.js"></script>
+    <script src="js/lib/angular-zxcvbn.js"></script>
+    <script src="js/lib/tmhDynamicLocale.min.js"></script>
+    <script src="js/lib/select.min.js"></script>
     <script src="js/app.js"></script>
     <script src="js/services.js"></script>
     <script src="js/directives.js"></script>
     <script src="js/filters.js"></script>
     <script src="js/templates.js"></script>
+    <script src="js/crypto/main.js"></script>
     <script src="js/controllers/main.js"></script>
     <script src="js/controllers/preferences.js"></script>
     <script src="js/controllers/fileupload.js"></script>
+    <script src="js/controllers/signup.js"></script>
     <script src="js/controllers/wizard.js"></script>
     <script src="js/controllers/home.js"></script>
     <script src="js/controllers/receiver.js"></script>
@@ -217,24 +224,49 @@
     <script src="js/controllers/admin/steps.js"></script>
     <script src="js/controllers/admin/questionnaires.js"></script>
     <script src="js/controllers/admin/overview.js"></script>
+    <script src="js/controllers/admin/network.js"></script>
     <script src="js/controllers/admin/stats.js"></script>
-    <script src="js/controllers/admin/shorturls.js"></script>
+    <script src="js/controllers/admin/tenant.js"></script>
     <script src="js/controllers/submission.js"></script>
     <script src="js/controllers/receipt.js"></script>
     <script src="js/controllers/login.js"></script>
     <script src="js/controllers/user.js"></script>
     <!-- endbuild -->
 
-    <script src="components/bowser/bowser.min.js"></script>
-
     <script type="text/javascript">
+      if(!window.console) { window.console={}; window.console.log = function(){}; }
+
       var isBrowserCompatible = function() {
-        // Make IE pass if >= 9
-        if (bowser.msie && bowser.version >= 9) {
-          return true;
+        var crawlers = [
+          "Googlebot",
+          "Bingbot",
+          "Slurp",
+          "DuckDuckBot",
+          "Baiduspider",
+          "YandexBot",
+          "Sogou",
+          "Exabot",
+          "ia_archiver"
+        ];
+
+        for (var i=0; i < crawlers.length; crawlers++) {
+          if (navigator.userAgent.indexOf(crawlers[i]) !== -1) {
+            return true;
+          }
         }
 
         if (typeof window === 'undefined') {
+          return false;
+        }
+
+        if (!(window.File && window.FileList && window.FileReader)) {
+          console.log("GlobaLeaks startup failure: missing support for File API");
+          return false;
+        }
+
+        if (typeof Blob === 'undefined' ||
+            (!Blob.prototype.slice && !Blob.prototype.webkitSlice && !!Blob.prototype.mozSlice)) {
+          console.log("GlobaLeaks startup failure: missing support for Blob API");
           return false;
         }
 
@@ -244,11 +276,15 @@
           return false;
         }
 
-        // Check related to WebCrypto compatibility currently disabled as end2end encryption  is still not finalized
-        if (!(window.crypto && window.crypto.getRandomValues) &&
-            !(typeof window.msCrypto === 'object' && typeof window.msCrypto.getRandomValues === 'function')) {
-          console.log("GlobaLeaks startup failure: missing end-2-end encryption requirements");
-          return false;
+        if (location.protocol === 'https:' || location.host.match(/^[a-z0-9]{16}\.onion$/)) {
+          /* Due to https://github.com/globaleaks/GlobaLeaks/issues/2088 the proof of work if currently
+             implemented only over Tor and HTTPS that are the production conditions. */
+
+          if (!(window.crypto && (window.crypto.subtle || window.crypto.webkitSubtle) && window.crypto.getRandomValues) &&
+              !(typeof window.msCrypto === 'object' && typeof window.msCrypto.getRandomValues === 'function')) {
+            console.log("GlobaLeaks startup failure: missing end-2-end encryption requirements");
+            return false;
+          }
         }
 
         return true;
@@ -262,7 +298,7 @@
          document.getElementsByTagName("head")[0].appendChild(fileref);
        }
       }
- 
+
       function start_globaleaks() {
         if (isBrowserCompatible()) {
           loadjsfile("js/scripts.js");
@@ -274,5 +310,6 @@
       <!-- start_globaleaks(); -->
     </script>
 
+    <script data-ng-if="Utils.attachCustomJS()" data-ng-src="{{Utils.base64ToTrustedScriptUrl(node.script)}}"></script>
   </body>
 </html>

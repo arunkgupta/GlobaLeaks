@@ -1,62 +1,52 @@
 # -*- coding: utf-8 -*-
-import random
-import json
+import os
 
+from sqlalchemy.exc import IntegrityError
+
+from twisted.python import failure
 from twisted.internet.defer import inlineCallbacks
 
-from globaleaks import __version__
-from globaleaks.rest.errors import InvalidInputFormat
-from globaleaks.tests import helpers
-from globaleaks.rest import requests, errors
 from globaleaks.handlers.admin import questionnaire
 from globaleaks.models import Questionnaire
+from globaleaks.rest import errors
+from globaleaks.tests import helpers
+from globaleaks.utils.utility import read_json_file
 
-# special guest:
-stuff = u"³²¼½¬¼³²"
 
-
-class TestQuestionnaireCollection(helpers.TestHandlerWithPopulatedDB):
+class TestQuestionnairesCollection(helpers.TestCollectionHandler):
     _handler = questionnaire.QuestionnairesCollection
-
-    def test_get(self):
-        handler = self.request(role='admin')
-        return handler.get()
+    _test_desc = {
+      'model': Questionnaire,
+      'create': questionnaire.create_questionnaire,
+      'data': {
+        'name': 'test'
+      }
+    }
 
     @inlineCallbacks
-    def test_post(self):
-        for attrname in Questionnaire.unicode_keys:
-            self.dummyQuestionnaire[attrname] = stuff
+    def test_post_invalid_json(self):
+        self.test_data_dir = os.path.join(helpers.DATA_DIR, 'questionnaires')
 
-        handler = self.request(self.dummyQuestionnaire, role='admin')
-        yield handler.post()
+        invalid_test_cases = [
+            ('cyclic_groupid.json', errors.InputValidationError),
+            ('duplicate_ids.json', IntegrityError)
+        ]
 
-        for attrname in Questionnaire.unicode_keys:
-            self.assertEqual(self.responses[0][attrname], stuff)
+        for fname, err in invalid_test_cases:
+            new_q = read_json_file(os.path.join(self.test_data_dir, fname))
+
+            handler = self.request(new_q, role='admin')
+            handler.request.language = None
+
+            yield self.assertFailure(handler.post(), err)
 
 
-class TestQuestionnaireInstance(helpers.TestHandlerWithPopulatedDB):
+class TestQuestionnaireInstance(helpers.TestInstanceHandler):
     _handler = questionnaire.QuestionnaireInstance
-
-    @inlineCallbacks
-    def test_get(self):
-        handler = self.request(role='admin')
-        yield handler.get(self.dummyQuestionnaire['id'])
-        self._handler.validate_message(json.dumps(self.responses[0]), requests.AdminQuestionnaireDesc)
-
-    @inlineCallbacks
-    def test_put(self):
-        for attrname in Questionnaire.unicode_keys:
-            self.dummyQuestionnaire[attrname] = stuff
-
-        handler = self.request(self.dummyQuestionnaire, role='admin')
-        yield handler.put(self.dummyQuestionnaire['id'])
-
-        for attrname in Questionnaire.unicode_keys:
-            self.assertEqual(self.responses[0][attrname], stuff)
-
-    @inlineCallbacks
-    def test_delete(self):
-        handler = self.request(self.dummyQuestionnaire, role='admin')
-        yield handler.delete(self.dummyQuestionnaire['id'])
-        yield self.assertFailure(handler.get(self.dummyQuestionnaire['id']),
-                                 errors.QuestionnaireIdNotFound)
+    _test_desc = {
+      'model': Questionnaire,
+      'create': questionnaire.create_questionnaire,
+      'data': {
+        'name': 'test'
+      }
+    }

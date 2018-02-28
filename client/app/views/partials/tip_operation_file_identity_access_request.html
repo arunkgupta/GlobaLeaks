@@ -1,12 +1,12 @@
 <div class="modal-header">
-  <button type="button" class="close" aria-hidden="true" data-ng-click="cancel()">
+  <button type="submit" class="close" aria-hidden="true" data-ng-click="cancel()">
     <i class="glyphicon glyphicon glyphicon-remove-circle"></i>
   </button>
   <div class="modal-title" data-translate>Request access to the whistleblower's identity</div>
 </div>
 <div class="modal-body">
   <label data-translate>Please write a motivation</label>
-  <span class="text-red" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right" popover-trigger="mouseenter">*</span>
+  <span class="text-danger" uib-popover="{{'This field is mandatory' | translate}}" popover-placement="right">*</span>
   <textarea class="form-control" data-ng-model="request_motivation" data-ng-attr-placeholder="{{'Request motivation' | translate}}"></textarea>
 </div>
 <div class="modal-footer">

@@ -1,35 +1,31 @@
-# -*- encoding: utf-8 -*-
-
-
-from storm.locals import Int, Unicode, DateTime
-
+# -*- coding: utf-8 -*-
 from globaleaks.db.migrations.update import MigrationBase
 from globaleaks.models import Model
+from globaleaks.models.properties import *
 
 
 class InternalFile_v_25(Model):
-    __storm_table__ = 'internalfile'
-    creation_date = DateTime()
-    internaltip_id = Unicode()
-    name = Unicode()
-    file_path = Unicode()
-    content_type = Unicode()
-    size = Int()
-    new = Int()
-    processing_attempts = Int()
+    __tablename__ = 'internalfile'
+    id = Column(Unicode(36), primary_key=True, default=uuid4, nullable=False)
+    creation_date = Column(DateTime)
+    internaltip_id = Column(Unicode(36))
+    name = Column(UnicodeText)
+    file_path = Column(UnicodeText)
+    content_type = Column(UnicodeText)
+    size = Column(Integer)
+    new = Column(Integer)
+    processing_attempts = Column(Integer)
 
 
 class MigrationScript(MigrationBase):
     def migrate_InternalFile(self):
-        old_objs = self.store_old.find(self.model_from['InternalFile'])
+        old_objs = self.session_old.query(self.model_from['InternalFile'])
         for old_obj in old_objs:
             new_obj = self.model_to['InternalFile']()
-            for _, v in new_obj._storm_columns.iteritems():
-                if v.name == 'submission':
+            for key in [c.key for c in new_obj.__table__.columns]:
+                if key == 'submission':
                     new_obj.submission = True
-                    continue
+                else:
+                    setattr(new_obj, key, getattr(old_obj, key))
 
-                setattr(new_obj, v.name, getattr(old_obj, v.name))
-
-            self.store_new.add(new_obj)
-
+            self.session_new.add(new_obj)

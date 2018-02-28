@@ -2,8 +2,8 @@
 #-*- coding: utf-8 -*-
 from __future__ import print_function
 
-from importlib import import_module
 import sys
+from importlib import import_module
 
 import pip
 from setuptools import find_packages, setup
@@ -35,15 +35,11 @@ setup(
     cmdclass={'test': TestCommand},
     package_dir={'globaleaks': 'globaleaks'},
     test_suite='globaleaks.tests',
-    package_data={'globaleaks': [
-        'db/sqlite.sql',
-    ]},
     packages=find_packages(exclude=['*.tests', '*.tests.*']),
     scripts=[
         'bin/globaleaks',
         'bin/gl-admin',
-        'bin/gl-fix-permissions',
-        'bin/gl-update'
+        'bin/gl-fix-permissions'
     ],
     install_requires=install_requires
 )

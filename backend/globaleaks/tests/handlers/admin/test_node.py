@@ -1,18 +1,13 @@
 # -*- coding: utf-8 -*-
-import random
-import json
-
-from twisted.internet.defer import inlineCallbacks
 
 from globaleaks import __version__
-from globaleaks.rest.errors import InvalidInputFormat
-from globaleaks.tests import helpers
-from globaleaks.rest import requests, errors
 from globaleaks.handlers.admin import node
-from globaleaks.models import Node
+from globaleaks.models.l10n import NodeL10NFactory
+from globaleaks.rest.errors import InputValidationError
+from globaleaks.tests import helpers
+from twisted.internet.defer import inlineCallbacks
 
 # special guest:
-
 stuff = u"³²¼½¬¼³²"
 
 
@@ -22,32 +17,38 @@ class TestNodeInstance(helpers.TestHandlerWithPopulatedDB):
     @inlineCallbacks
     def test_get(self):
         handler = self.request(role='admin')
-        yield handler.get()
+        response = yield handler.get()
 
-        self.assertTrue(self.responses[0]['version'], __version__)
+        self.assertTrue(response['version'], __version__)
 
     @inlineCallbacks
     def test_put_update_node(self):
-        self.dummyNode['hidden_service'] = 'http://abcdef1234567890.onion'
-        self.dummyNode['public_site'] = 'https://blogleaks.blogspot.com'
+        self.dummyNode['hostname'] = 'blogleaks.blogspot.com'
 
-        for attrname in Node.localized_keys:
+        for attrname in NodeL10NFactory.keys:
             self.dummyNode[attrname] = stuff
 
         handler = self.request(self.dummyNode, role='admin')
-        yield handler.put()
+        response = yield handler.put()
 
-        self.assertTrue(isinstance(self.responses[0], dict))
-        self.assertTrue(self.responses[0]['version'], __version__)
+        self.assertTrue(isinstance(response, dict))
+        self.assertTrue(response['version'], __version__)
 
-        for response_key in self.responses[0].keys():
+        for response_key in response.keys():
             # some keys are added by GLB, and can't be compared
-            if response_key in ['password', 'languages_supported',
+            if response_key in ['creation_date',
+                                'acme',
+                                'https_enabled',
+                                'languages_supported',
                                 'version', 'version_db',
-                                'configured', 'wizard_done']:
+                                'latest_version',
+                                'configured', 'wizard_done',
+                                'receipt_salt', 'languages_enabled',
+                                'root_tenant', 'https_possible',
+                                'hostname', 'onionservice']:
                 continue
 
-            self.assertEqual(self.responses[0][response_key],
+            self.assertEqual(response[response_key],
                              self.dummyNode[response_key])
 
     @inlineCallbacks
@@ -55,22 +56,38 @@ class TestNodeInstance(helpers.TestHandlerWithPopulatedDB):
         self.dummyNode['languages_enabled'] = ["en", "shit"]
         handler = self.request(self.dummyNode, role='admin')
 
-        yield self.assertFailure(handler.put(), InvalidInputFormat)
+        yield self.assertFailure(handler.put(), InputValidationError)
 
     @inlineCallbacks
-    def test_put_update_node_invalid_hidden(self):
-        self.dummyNode['hidden_service'] = 'http://www.scroogle.com'
-        self.dummyNode['public_site'] = 'http://blogleaks.blogspot.com'
+    def test_put_update_node_languages_with_default_not_compatible_with_enabled(self):
+        self.dummyNode['languages_enabled'] = ["fr"]
+        self.dummyNode['default_language'] = "en"
+        handler = self.request(self.dummyNode, role='admin')
+
+        yield self.assertFailure(handler.put(), InputValidationError)
+
+    @inlineCallbacks
+    def test_put_update_node_languages_removing_en_adding_fr(self):
+        # this tests start setting en as the only enabled language and
+        # ends keeping enabled only french.
+        self.dummyNode['languages_enabled'] = ["en"]
+        self.dummyNode['default_language'] = "en"
+        handler = self.request(self.dummyNode, role='admin')
+        yield handler.put()
+
+        self.dummyNode['languages_enabled'] = ["fr"]
+        self.dummyNode['default_language'] = "fr"
+        handler = self.request(self.dummyNode, role='admin')
+        yield handler.put()
+
+    @inlineCallbacks
+    def test_update_ignored_fields(self):
+        self.dummyNode['onionservice'] = 'xxx'
+        self.dummyNode['hostname'] = 'yyy'
 
         handler = self.request(self.dummyNode, role='admin')
 
-        yield self.assertFailure(handler.put(), InvalidInputFormat)
+        resp = yield handler.put()
 
-    @inlineCallbacks
-    def test_put_update_node_invalid_public(self):
-        self.dummyNode['hidden_service'] = 'http://abcdef1234567890.onion'
-        self.dummyNode['public_site'] = 'blogleaks.blogspot.com'
-
-        handler = self.request(self.dummyNode, role='admin')
-
-        yield self.assertFailure(handler.put(), InvalidInputFormat)
+        self.assertNotEqual('xxx', resp['hostname'])
+        self.assertNotEqual('yyy', resp['onionservice'])

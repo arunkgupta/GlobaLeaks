@@ -1,11 +1,26 @@
-GLClient.controller('ReceiverSidebarCtrl', ['$scope', '$location', function($scope, $location){
-  var current_menu = $location.path().split('/').slice(-1);
-  $scope.active = {};
-  $scope.active[current_menu] = "active";
-}]).
-controller('ReceiverTipsCtrl', ['$scope',  '$http', '$route', '$location', '$uibModal', 'ReceiverTips',
-  function($scope, $http, $route, $location, $uibModal, ReceiverTips) {
-  $scope.tips = ReceiverTips.query();
+GLClient.controller('ReceiverTipsCtrl', ['$scope',  '$filter', '$http', '$route', '$location', '$uibModal', 'RTipExport', 'ReceiverTips',
+  function($scope, $filter, $http, $route, $location, $uibModal, RTipExport, ReceiverTips) {
+  $scope.search = undefined;
+  $scope.currentPage = 1;
+  $scope.itemsPerPage = 20;
+
+  $scope.tips = ReceiverTips.query(function(tips) {
+    angular.forEach(tips, function (tip) {
+      tip.context = $scope.contexts_by_id[tip.context_id];
+      tip.context_name = tip.context.name;
+    });
+  });
+
+  $scope.filteredTips = $scope.tips;
+
+  $scope.$watch('search', function (value) {
+    if (value != undefined) {
+      $scope.currentPage = 1;
+      $scope.filteredTips = $filter('filter')($scope.tips, value);
+    }
+  });
+
+  $scope.exportTip = RTipExport;
 
   $scope.selected_tips = [];
 
@@ -64,7 +79,7 @@ controller('ReceiverTipsCtrl', ['$scope',  '$http', '$route', '$location', '$uib
   };
 }]).
 controller('TipBulkOperationsCtrl', ['$scope', '$http', '$route', '$location', '$uibModalInstance', 'selected_tips', 'operation',
-                        function ($scope, $http, $route, $location, $uibModalInstance, selected_tips, operation) {
+  function ($scope, $http, $route, $location, $uibModalInstance, selected_tips, operation) {
   $scope.selected_tips = selected_tips;
   $scope.operation = operation;
 
@@ -79,10 +94,10 @@ controller('TipBulkOperationsCtrl', ['$scope', '$http', '$route', '$location', '
       return;
     }
 
-    return $http({method: 'PUT', url: '/rtip/operations', data:{
+    return $http({method: 'PUT', url: 'rtip/operations', data:{
       'operation': $scope.operation,
       'rtips': $scope.selected_tips
-    }}).success(function(){
+    }}).then(function(){
       $scope.selected_tips = [];
       $route.reload();
     });

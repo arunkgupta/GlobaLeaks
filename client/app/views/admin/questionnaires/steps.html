@@ -1,18 +1,22 @@
-<div id="StepAddBox" data-ng-controller="AdminStepAddCtrl">
-  <div class="row">
+<div id="StepsEditBox">
+  <div class="editorTitle row">
+    <span class="col-md-8">
+      <span data-translate>Steps</span>
+      <button class="btn btn-xs btn-primary show-add-step-btn" data-ng-click="toggleAddStep()">
+        <i class="glyphicon glyphicon-plus"></i>
+        <span data-translate>Add</span>
+      </button>
+    </span>
+  </div>
+  <div id="StepAddBox" data-ng-controller="AdminStepAddCtrl" class="row" data-ng-if="showAddStep">
     <div class="col-md-6">
-      <div class="editorTitle row">
-        <span class="col-md-8">
-          <span data-translate>Add new step</span>
-        </span>
-      </div>
-      <div data-ng-form="" name="newStep">
+      <div data-ng-form="newStep">
         <div class="row">
           <div class="col-md-12">
             <div class="form-group">
               <label data-translate>Label</label>
               <input name="label" class="form-control" data-ng-model="new_step.label" type="text" required>
-              <div class="text-red" data-ng-show="newStep.label.$error.required">
+              <div class="text-danger" data-ng-show="newStep.label.$error.required">
                 <span data-translate>This field is mandatory</span>
               </div>
             </div>
@@ -21,7 +25,7 @@
         <div class="row">
           <div class="col-md-12">
             <div class="form-group">
-              <button class="pull-left btn btn-primary" data-ng-disabled="newStep.$invalid" data-ng-click="add_step()">
+              <button id="add-step-btn" class="pull-left btn btn-primary" data-ng-disabled="newStep.$invalid" data-ng-click="add_step(); toggleAddStep()">
                 <i class="glyphicon glyphicon-plus-sign"></i>
                 <span data-translate>Add</span>
               </button>
@@ -31,24 +35,8 @@
       </div>
     </div>
   </div>
-</div>
-<div id="StepsEditBox" data-ng-show="questionnaire.steps.length > 0">
-  <div class="editorTitle row">
-    <span class="col-md-8">
-      <span data-translate>Configured steps:</span>
-    </span>
-    <span class="col-md-4 text-right">
-      <button class="btn btn-xs btn-danger"
-              data-ng-show="questionnaire.steps.length > 0"
-              data-ng-click="delAllSteps()"
-              popover-placement="right"
-              popover-trigger="mouseenter">
-        <span data-translate>Delete all</span>
-      </button>
-    </span>
-  </div>
   <div class="row">
-    <div data-ng-repeat="step in questionnaire.steps | orderBy:'presentation_order'">
+    <div data-ng-repeat="step in questionnaire.steps">
       <div class="col-md-12"
            data-ng-controller="AdminStepEditorCtrl">
         <div class="configItem">
@@ -59,44 +47,41 @@
             </span>
             <span class="col-md-5">
               <span class="pull-right">
+                <button data-ng-show="!$first" class="actionButton btn btn-xs btn-primary" data-ng-click="moveUp($event, $index)" uib-popover="{{'Move up' | translate}}" popover-placement="left">
+                  <i class="glyphicon glyphicon-menu-up"></i>
+                </button>
+                <button data-ng-show="!$last" class="actionButton btn btn-xs btn-primary" data-ng-click="moveDown($event, $index)" uib-popover="{{'Move down' | translate}}" popover-placement="left">
+                  <i class="glyphicon glyphicon-menu-down"></i>
+                </button>
                 <button
-                  class="actionButton btn btn-xs btn-default"
+                  class="btn btn-xs btn-default"
                   data-ng-show="!editing"
                   data-ng-click="toggleEditing(); $event.stopPropagation();">
                   <span data-translate>Edit</span>
                 </button>
                 <button
-                  class="actionButton btn btn-xs btn-success"
+                  class="btn btn-xs btn-success"
                   data-ng-show="editing"
                   data-ng-click="save_step(step);">
                   <span data-translate>Save</span>
                 </button>
                 <button
-                  class="actionButton btn btn-xs btn-default"
+                  class="btn btn-xs btn-default"
                   data-ng-show="editing"
                   data-ng-click="toggleEditing(); $event.stopPropagation();">
                   <span data-translate>Cancel</span>
                 </button>
                 <button
-                  class="actionButton btn btn-xs btn-danger"
+                  class="btn btn-xs btn-danger"
                   data-ng-click="delStep(step); $event.stopPropagation();"
                   uib-popover="{{Delete | translate}}"
-                  popover-placement="right"
-                  popover-trigger="mouseenter">
+                  popover-placement="right">
                   <span data-translate>Delete</span>
                 </button>
-                <span data-ng-if="questionnaire.steps.length > 1">
-                  <button class="actionButton btn btn-xs btn-primary" data-ng-click="moveUpAndSave(step); $event.stopPropagation();" uib-popover="{{'Move up' | translate}}" popover-placement="left" popover-trigger="mouseenter">
-                    <i class="glyphicon glyphicon-menu-up"></i>
-                  </button>
-                  <button class="actionButton btn btn-xs btn-primary" data-ng-click="moveDownAndSave(step); $event.stopPropagation();" uib-popover="{{'Move down' | translate}}" popover-placement="left" popover-trigger="mouseenter">
-                    <i class="glyphicon glyphicon-menu-down"></i>
-                  </button>
-                </span>
               </span>
             </span>
           </div>
-          <div data-ng-form="" name="editStep" data-ng-show="editing">
+          <div data-ng-form="editStep" data-ng-if="editing">
             <hr />
             <div class="row">
               <div class="form-group">
@@ -104,12 +89,6 @@
                   <label data-translate>Label</label>
                   <input class="form-control" data-ng-model="step.label" type="text" required />
                 </div>
-              </div>
-            </div>
-            <div class="row">
-              <div class="form-group col-md-6">
-                <label data-translate>Hint</label>
-                <input class="form-control" data-ng-model="step.hint" type="text" />
               </div>
             </div>
             <div class="row">
@@ -126,40 +105,34 @@
                 <input class="form-control" data-ng-model="step.triggered_by_score" type="number" min="0" max="1000">
               </div>
             </div>
-            <div class="row adminConfigSection">
-              <div class="col-md-6">
-                <div class="editorTitle row">
-                  <span class="col-md-8">
-                    <span data-translate>Add new question</span>
-                  </span>
-                  <span class="col-md-4 text-right">
-                    <button class="btn btn-xs btn-danger"
-                            data-ng-show="step.children.length > 0"
-                            data-ng-click="delAllFields()"
-                            popover-placement="right"
-                            popover-trigger="mouseenter">
-                      <span data-translate>Delete all</span>
+            <div id="FieldsEditBox" class="form-group">
+              <div class="row">
+                <span class="col-md-12">
+                  <label>
+                    <span data-translate>Questions</span>
+                    <button class="btn btn-xs btn-primary show-add-question-btn" data-ng-click="toggleAddQuestion()">
+                      <i class="glyphicon glyphicon-plus"></i>
+                      <span data-translate>Add new question</span>
                     </button>
-                  </span>
-                </div>
-                <div class="nested">
+                    <button class="btn btn-xs btn-primary show-add-question-from-template-btn" data-ng-click="toggleAddQuestionFromTemplate()" data-ng-if="admin.fieldtemplates.length > 0">
+                      <i class="glyphicon glyphicon-plus"></i>
+                      <span data-translate>Add question from template</span>
+                    </button>
+                  </label>
+                </span>
+              </div>
+              <div class="row adminConfigSection" data-ng-if="showAddQuestion">
+                <div class="col-md-6">
                   <div data-ng-include="'views/admin/questionnaires/add_field.html'"></div>
                 </div>
               </div>
-            </div>
-            <div class="row adminConfigSection" data-ng-if="admin.node.enable_experimental_features">
-              <div class="col-md-6">
-                <div data-ng-include="'views/admin/questionnaires/add_field_from_template.html'"></div>
+              <div class="row adminConfigSection" data-ng-if="showAddQuestionFromTemplate">
+                <div class="col-md-6">
+                  <div data-ng-include="'views/admin/questionnaires/add_field_from_template.html'"></div>
+                </div>
               </div>
-            </div>
-            <div id="FieldsEditBox" class="form-group" data-ng-show="step.children.length > 0">
-              <div class="editorTitle row">
-                <span class="col-md-12">
-                  <span data-translate>Configured questions:</span>
-                </span>
-              </div>
-              <div class="configuredFields">
-                <div data-ng-repeat="field in step.children | orderBy:['y', 'x']">
+              <div class="row configuredFields">
+                <div class="col-md-12" data-ng-repeat="field in step.children | orderBy:['y', 'x']">
                   <div data-ng-include="'views/admin/questionnaires/fields.html'"></div>
                 </div>
               </div>

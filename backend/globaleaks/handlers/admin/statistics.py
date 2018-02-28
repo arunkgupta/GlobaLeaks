@@ -1,22 +1,15 @@
-#/a -*- coding: UTF-8
-#
-#   statistics
-#   **********
-#
-# Implementation of classes handling the HTTP request to /node, public
-# exposed API.
-
+# -*- coding: utf-8
+# Implementation of admin statistics handlers
 import operator
-from storm.expr import Desc, And
-from twisted.internet.defer import inlineCallbacks
+from datetime import timedelta
 
-from globaleaks.orm import transact, transact_ro
-from globaleaks.event import EventTrackQueue, events_monitored
+from globaleaks.event import events_monitored
 from globaleaks.handlers.base import BaseHandler
 from globaleaks.models import Stats, Anomalies
-from globaleaks.settings import GLSettings
+from globaleaks.orm import transact
+from globaleaks.state import State
 from globaleaks.utils.utility import datetime_to_ISO8601, datetime_now, \
-    utc_past_date, iso_to_gregorian, log
+    iso_to_gregorian
 
 
 def weekmap_to_heatmap(week_map):
@@ -24,28 +17,27 @@ def weekmap_to_heatmap(week_map):
     convert a list of list with dict inside, in a flat list
     """
     retlist = []
-    for weekday_n, weekday in enumerate(week_map):
+    for _, weekday in enumerate(week_map):
         for _, hourinfo in enumerate(weekday):
             retlist.append(hourinfo)
 
     return retlist
 
-@transact_ro
-def get_stats(store, week_delta):
+
+@transact
+def get_stats(session, tid, week_delta):
     """
     :param week_delta: commonly is 0, mean that you're taking this
         week. -1 is the previous week.
     At the moment do not support negative number and change of the year.
     """
     now = datetime_now()
-    week_delta = abs(week_delta)
+    week_delta = abs(int(week_delta))
 
+    target_week = datetime_now()
     if week_delta > 0:
         # delta week in the past
-        target_week = utc_past_date(hours=(week_delta * 24 * 7))
-    else:
-        # taking current time!
-        target_week = datetime_now()
+        target_week -= timedelta(hours=week_delta * 24 * 7)
 
     looked_week = target_week.isocalendar()[1]
     looked_year = target_week.isocalendar()[0]
@@ -57,10 +49,12 @@ def get_stats(store, week_delta):
     lower_bound = iso_to_gregorian(looked_year, looked_week, 1)
     upper_bound = iso_to_gregorian(looked_year, looked_week + 1, 1)
 
-    hourlyentries = store.find(Stats, And(Stats.start >= lower_bound, Stats.start <= upper_bound))
+    hourlyentries = session.query(Stats).filter(Stats.tid == tid,
+                                              Stats.start >= lower_bound,
+                                              Stats.start <= upper_bound)
 
     week_entries = 0
-    week_map = [[dict() for i in xrange(24)] for j in xrange(7)]
+    week_map = [[dict() for i in range(24)] for j in range(7)]
 
     # Loop over the DB stats to fill the appropriate heatmap
     for hourdata in hourlyentries:
@@ -68,83 +62,56 @@ def get_stats(store, week_delta):
         stats_day = int(hourdata.start.weekday())
         stats_hour = int(hourdata.start.isoformat()[11:13])
 
-        hourly_dict = {
+        week_map[stats_day][stats_hour] = {
             'hour': stats_hour,
             'day': stats_day,
             'summary': hourdata.summary,
-            'free_disk_space': hourdata.free_disk_space,
             'valid': 0  # 0 means valid data
         }
 
-        if week_map[stats_day][stats_hour]:
-            continue
-
-        week_map[stats_day][stats_hour] = hourly_dict
         week_entries += 1
 
-    # if all the hourly element are avail
-    if week_entries == (7 * 24):
-        return {
-            'complete': True,
-            'week': datetime_to_ISO8601(target_week),
-            'heatmap': weekmap_to_heatmap(week_map)
-        }
+    # if all the hourly element is available
+    if week_entries != (7 * 24):
+        for day in range(7):
+            for hour in range(24):
+                if week_map[day][hour]:
+                    continue
 
-    # else, supply default for the missing hour.
-    # an hour can miss for two reason: the node was down (alarm)
-    # or the hour is in the future (just don't display nothing)
-    # -- this can be moved in the initialization phases ?
-    for day in xrange(7):
-        for hour in xrange(24):
+                # valid is used as status variable.
+                # in the case the stats for the hour are missing it
+                # assumes the following values:
+                #  the hour is lacking from the results: -1
+                #  the hour is in the future: -2
+                #  the hour is the current hour (in the current day): -3
+                if current_week != looked_week:
+                    marker = -1
+                elif day > current_wday or \
+                    (day == current_wday and hour > current_hour):
+                    marker = -2
+                elif current_wday == day and hour == current_hour:
+                    marker = -3
+                else:
+                    marker = -1
 
-            if week_map[day][hour]:
-                continue
-
-            # valid is used as status variable.
-            # in the case the stats for the hour are missing it
-            # assumes the following values:
-            #  the hour is lacking from the results: -1
-            #  the hour is in the future: -2
-            #  the hour is the current hour (in the current day): -3
-            if current_week != looked_week:
-                marker = -1
-            elif day > current_wday or \
-                (day == current_wday and hour > current_hour):
-                marker = -2
-            elif current_wday == day and hour == current_hour:
-                marker = -3
-            else:
-                marker = -1
-
-            week_map[day][hour] = {
-                'hour': hour,
-                'day': day,
-                'summary': {},
-                'free_disk_space': 0,
-                'valid': marker
-            }
+                week_map[day][hour] = {
+                    'hour': hour,
+                    'day': day,
+                    'summary': {},
+                    'free_disk_space': 0,
+                    'valid': marker
+                }
 
     return {
-        'complete': False,
+        'complete': week_entries == (7 * 24),
         'week': datetime_to_ISO8601(target_week),
         'heatmap': weekmap_to_heatmap(week_map)
     }
 
 
 @transact
-def delete_weekstats_history(store):
-    allws = store.find(Stats)
-
-    log.info("Deleting %d entries from Stats table" % allws.count())
-
-    allws.remove()
-
-    log.info("Week statistics removal completed.")
-
-
-@transact_ro
-def get_anomaly_history(store, limit):
-    anomalies = store.find(Anomalies).order_by(Desc(Anomalies.date))[:limit]
+def get_anomaly_history(session, tid, limit):
+    anomalies = session.query(Anomalies).filter(Anomalies.tid == tid).order_by(Anomalies.date.desc())[:limit]
 
     anomaly_history = []
     for _, anomaly in enumerate(anomalies):
@@ -153,7 +120,7 @@ def get_anomaly_history(store, limit):
             'alarm': anomaly.alarm,
             'events': [],
         })
-        for event_type, event_count in anomaly.events.iteritems():
+        for event_type, event_count in anomaly.events.items():
             anomaly_entry['events'].append({
                 'type': event_type,
                 'count': event_count,
@@ -163,62 +130,21 @@ def get_anomaly_history(store, limit):
     return anomaly_history
 
 
-@transact
-def delete_anomaly_history(store):
-    allanom = store.find(Anomalies)
-
-    log.info("Deleting %d entries from Anomalies table" % allanom.count())
-
-    allanom.remove()
-
-    log.info("Anomalies collection removal completed.")
-
-
 class AnomalyCollection(BaseHandler):
-    @BaseHandler.transport_security_check("admin")
-    @BaseHandler.authenticated("admin")
-    @inlineCallbacks
-    def get(self):
-        anomaly_history = yield get_anomaly_history(limit=20)
-        self.write(anomaly_history)
+    check_roles = 'admin'
 
-    @BaseHandler.transport_security_check("admin")
-    @BaseHandler.authenticated("admin")
-    @inlineCallbacks
-    def delete(self):
-        log.info("Received anomalies history delete command")
-        yield delete_anomaly_history()
-        self.write([])
+    def get(self):
+        return get_anomaly_history(self.request.tid, limit=20)
 
 
 class StatsCollection(BaseHandler):
     """
-    This Handler returns the list of the stats, stats is the aggregated
-    count of activities recorded in the delta defined in GLSettingss
-    /admin/stats
+    This Handler returns the list of the stats for the requested range
     """
-    @BaseHandler.transport_security_check("admin")
-    @BaseHandler.authenticated("admin")
-    @inlineCallbacks
+    check_roles = 'admin'
+
     def get(self, week_delta):
-        week_delta = int(week_delta)
-
-        if week_delta:
-            log.debug("Asking statistics for %d weeks ago" % week_delta)
-        else:
-            log.debug("Asking statistics for current week")
-
-        ret = yield get_stats(week_delta)
-
-        self.write(ret)
-
-    @BaseHandler.transport_security_check("admin")
-    @BaseHandler.authenticated("admin")
-    @inlineCallbacks
-    def delete(self):
-        log.info("Received statistic history delete command")
-        yield delete_weekstats_history()
-        self.write([])
+        return get_stats(self.request.tid, week_delta)
 
 
 class RecentEventsCollection(BaseHandler):
@@ -226,6 +152,8 @@ class RecentEventsCollection(BaseHandler):
     This handler is refreshed constantly by an admin page
     and provide real time update about the GlobaLeaks status
     """
+    check_roles = 'admin'
+
     def get_summary(self, templist):
         eventmap = dict()
         for event in events_monitored:
@@ -236,19 +164,30 @@ class RecentEventsCollection(BaseHandler):
 
         return eventmap
 
-    @BaseHandler.transport_security_check("admin")
-    @BaseHandler.authenticated("admin")
     def get(self, kind):
-        templist = []
+        templist = [e.serialize() for e in State.tenant_state[self.request.tid].EventQ]
 
-        # the current 30 seconds
-        templist += EventTrackQueue.take_current_snapshot()
-        # the already stocked by side, until Stats dump them in 1hour
-        templist += GLSettings.RecentEventQ
-
-        templist.sort(key=operator.itemgetter('id'))
+        templist.sort(key=operator.itemgetter('creation_date'))
 
         if kind == 'details':
-            self.write(templist)
-        else:  # kind == 'summary':
-            self.write(self.get_summary(templist))
+            return templist
+
+        return self.get_summary(templist)
+
+
+class JobsTiming(BaseHandler):
+    """
+    This handler return the timing for the latest scheduler execution
+    """
+    check_roles = 'admin'
+
+    def get(self):
+        response = []
+
+        for job in State.jobs:
+            response.append({
+              'name': job.name,
+              'timings': job.last_executions
+            })
+
+        return response

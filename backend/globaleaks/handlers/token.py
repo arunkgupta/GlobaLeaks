@@ -1,63 +1,56 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #
-# token
-# **********
-#
-# Implements an API for gettin/updating tokens to be used for performing user operations
-# subject in general to rate limit.
-
+# Handler implementing pre/post submission tokens for implementing rate limiting on whistleblower operations
 from globaleaks.handlers.base import BaseHandler
-from globaleaks.utils.token import Token, TokenList
 from globaleaks.rest import errors, requests
-from globaleaks.settings import GLSettings
+from globaleaks.utils.token import Token, TokenList
 
 
 class TokenCreate(BaseHandler):
     """
     This class implement the handler for requesting a token.
     """
-    @BaseHandler.unauthenticated
+    check_roles = 'unauthenticated'
+
     def post(self):
         """
-        Request: None
-        Response: TokenDesc (Token)
-        Errors: InvalidInputFormat
-
         This API create a Token, a temporary memory only object able to keep
         track of the submission. If the system is under stress, complete the
         submission will require some actions to be performed before the
         submission can be concluded (e.g. hashcash and captchas).
         """
-        request = self.validate_message(self.request.body, requests.TokenReqDesc)
+        if not self.request.client_using_tor and not self.state.tenant_cache[self.request.tid]['https_whistleblower']:
+            raise errors.TorNetworkRequired
 
-        if request['type'] == 'submission':
-            if not GLSettings.accept_submissions:
-                raise errors.SubmissionDisabled
+        request = self.validate_message(self.request.content.read(), requests.TokenReqDesc)
 
-            # TODO implement further validations for different token options based on type
-            # params = self.validate_message(request['params'], requests.TokenParamsSubmissionDesc)
+        if request['type'] == 'submission' and not self.state.accept_submissions:
+            raise errors.SubmissionDisabled
 
-        token = Token(request['type'])
+        token = Token(self.request.tid, request['type'])
 
-        self.set_status(201) # Created
-        self.write(token.serialize())
+        if not self.request.client_using_tor and (self.request.client_proto == 'http' and \
+                                                  self.request.hostname not in ['127.0.0.1', 'localhost']):
+            # Due to https://github.com/globaleaks/GlobaLeaks/issues/2088 the proof of work if currently
+            # implemented only over Tor and HTTPS that are the production conditions.
+            token.proof_of_work['solved'] = True
+
+        return token.serialize()
 
 
 class TokenInstance(BaseHandler):
     """
-    This class impleement the handler for updating a token (e.g.: solving a captcha)
+    This class implements the handler for updating a token (e.g.: solving a captcha)
     """
-    @BaseHandler.unauthenticated
+    check_roles = 'unauthenticated'
+
     def put(self, token_id):
-        """
-        Parameter: token_id
-        Request: TokenAnswerDesc
-        Response: TokenDesc
-        """
-        request = self.validate_message(self.request.body, requests.TokenAnswerDesc)
+        request = self.validate_message(self.request.content.read(), requests.TokenAnswerDesc)
 
         token = TokenList.get(token_id)
+        if token is None or self.request.tid != token.tid:
+            raise errors.InvalidAuthentication
+
         token.update(request)
 
-        self.set_status(202) # Updated
-        self.write(token.serialize())
+        return token.serialize()

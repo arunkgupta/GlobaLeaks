@@ -1,101 +1,26 @@
-GLClient.controller('AdminCtrl',
-    ['$scope', '$route', '$location', '$filter', 'Admin', 'CONSTANTS',
-    function($scope, $route, $location, $filter, Admin, CONSTANTS) {
+GLClient.
+controller('AdminCtrl',
+    ['$scope', '$route', '$location', '$filter', 'resources', 'Utils', 'AdminUtils', 'AdminNodeResource', 'UpdateService', 'CONSTANTS',
+    function($scope, $route, $location, $filter, resources, Utils, AdminUtils, AdminNodeResource, UpdateService, CONSTANTS) {
   $scope.email_regexp = CONSTANTS.email_regexp;
+  $scope.hostname_regexp = CONSTANTS.hostname_regexp;
+  $scope.onionservice_regexp = CONSTANTS.onionservice_regexp;
   $scope.https_regexp = CONSTANTS.https_regexp;
-  $scope.tor_regexp = CONSTANTS.tor_regexp;
-  $scope.timezones = CONSTANTS.timezones;
 
-  // XXX convert this to a directive
+  // TODO convert this to a directive
   // This is used for setting the current menu in the sidebar
   var current_menu = $location.path().split('/').slice(-1);
   $scope.active = {};
   $scope.active[current_menu] = "active";
 
-  $scope.admin = new Admin(function() {
-    $scope.languages_enabled_edit = {};
-    $scope.languages_enabled_selector = [];
+  $scope.update_service = UpdateService;
 
-    $scope.languages_supported = {};
-    $scope.languages_enabled = [];
-    $scope.languages_enabled_selector = [];
-    angular.forEach($scope.admin.node.languages_supported, function(lang) {
-      var code = lang.code;
-      var name = lang.name;
-      $scope.languages_supported[code] = name;
-      if ($scope.admin.node.languages_enabled.indexOf(code) !== -1) {
-        $scope.languages_enabled[code] = name;
-        $scope.languages_enabled_selector.push({"name": name,"code": code});
-      }
-    });
+  $scope.admin_utils = AdminUtils;
 
-    $scope.languages_enabled_selector = $filter('orderBy')($scope.languages_enabled_selector, 'name');
+  $scope.admin = resources;
 
-    $scope.$watch('languages_enabled', function() {
-      if ($scope.languages_enabled) {
-        $scope.languages_enabled_edit = {};
-        angular.forEach($scope.languages_supported, function(lang, code){
-          $scope.languages_enabled_edit[code] = code in $scope.languages_enabled;
-        });
-      }
-    }, true);
-
-    $scope.$watch('languages_enabled_edit', function() {
-      if ($scope.languages_enabled) {
-        var languages_enabled_selector = [];
-        var change_default = false;
-        var language_selected = $scope.admin.node.default_language;
-        if (! $scope.languages_enabled_edit[$scope.admin.node.default_language]) {
-          change_default = true;
-        }
-
-        angular.forEach($scope.languages_supported, function(lang, code) {
-          if ($scope.languages_enabled_edit[code]) {
-            languages_enabled_selector.push({'name': lang, 'code': code});
-
-            if (change_default === true) {
-              language_selected = code;
-              change_default = false;
-            }
-          }
-        });
-
-        var languages_enabled = [];
-        angular.forEach($scope.languages_enabled_edit, function(enabled, code) {
-          if (enabled) {
-            languages_enabled.push(code);
-          }
-        });
-
-        $scope.admin.node.default_language = language_selected;
-        $scope.admin.node.languages_enabled = languages_enabled;
-  
-        $scope.languages_enabled_selector = languages_enabled_selector;
-
-      }
-    }, true);
-  });
-
-  // We need to have a special function for updating the node since we need to add old_password and password attribute
-  // if they are not present
-  $scope.updateNode = function(node) {
-    if (node.password === undefined) {
-      node.password = "";
-    }
-
-    if (node.check_password === undefined) {
-      node.password = "";
-    }
-
-    if (node.old_password === undefined) {
-      node.old_password = "";
-    }
-
-    var cb = function() {
-      $scope.$emit("REFRESH");
-    };
-
-    $scope.update(node, cb);
+  $scope.updateNode = function() {
+    Utils.update($scope.admin.node, function() { $scope.$emit("REFRESH"); });
   };
 
   $scope.newItemOrder = function(objects, key) {
@@ -113,55 +38,8 @@ GLClient.controller('AdminCtrl',
     return max + 1;
   };
 }]).
-controller('AdminFileUploadCtrl', ['$scope', function($scope){
-    $scope.uploadfile = false;
-
-    $scope.fileSelected = false;
-    $scope.markFileSelected = function () {
-      $scope.fileSelected = true;
-    };
-
-    $scope.openUploader = function () {
-      $scope.uploadfile = true;
-    };
-
-    $scope.closeUploader = function () {
-      $scope.uploadfile = $scope.fileSelected = false;
-    };
-}]).
-controller('AdminImgUploadCtrl', ['$scope', function($scope){
-    $scope.uploadfile = false;
-
-    $scope.fileSelected = false;
-    $scope.markFileSelected = function () {
-      $scope.fileSelected = true;
-    };
-
-    $scope.openUploader = function () {
-      $scope.uploadfile = true;
-    };
-
-    $scope.closeUploader = function () {
-      $scope.uploadfile = $scope.fileSelected = false;
-    };
-
-    $scope.$on('flow::fileAdded', function (event, $flow, flowFile) {
-      $scope.file_upload_error = undefined;
-      if (flowFile.size > $scope.node.maximum_filesize * 1024 * 1024) {
-        $scope.file_upload_error = "This file exceeds the maximum upload size for this server.";
-      } else if(flowFile.file.type !== "image/png") {
-        $scope.file_upload_error = "Only PNG files are currently supported.";
-      }
-
-      if ($scope.file_upload_error !== undefined)  {
-        flowFile.error = true;
-        flowFile.error_msg = $scope.file_upload_error;
-        event.preventDefault();
-      }
-    });
-}]).
-controller('AdminGeneralSettingsCtrl', ['$scope', '$http', 'StaticFiles',
-  function($scope, $http, StaticFiles){
+controller('AdminGeneralSettingsCtrl', ['$scope', '$filter', '$http', 'Files', 'AdminL10NResource', 'DefaultL10NResource',
+  function($scope, $filter, $http, Files, AdminL10NResource, DefaultL10NResource){
   $scope.tabs = [
     {
       title:"Main configuration",
@@ -172,64 +50,122 @@ controller('AdminGeneralSettingsCtrl', ['$scope', '$http', 'StaticFiles',
       template: "views/admin/content/tab2.html"
     },
     {
-      title: "Translation customization",
+      title: "Languages",
       template: "views/admin/content/tab3.html"
+    },
+    {
+      title: "Text customization",
+      template: "views/admin/content/tab4.html"
     }
   ];
 
-  $scope.staticfiles = [];
+  $scope.admin_files = [
+      {
+        'title': 'CSS',
+        'varname': 'css',
+        'filename': 'custom_stylesheet.css',
+        'type': 'css',
+        'size': '1048576'
+      },
+      {
+        'title': 'JavaScript',
+        'varname': 'script',
+        'filename': 'custom_script.js',
+        'type': 'js',
+        'size': '1048576'
+      }
+  ];
 
-  $scope.update_static_files = function () {
-    var updated_staticfiles = StaticFiles.query(function () {
-      $scope.staticfiles = updated_staticfiles;
+  $scope.vars = {
+    'language_to_customize': $scope.node.default_language
+  };
+
+  $scope.get_l10n = function(lang) {
+    if (!lang) {
+      return;
+    }
+
+    $scope.custom_texts = AdminL10NResource.get({'lang': lang});
+    DefaultL10NResource.get({'lang': lang}, function(default_texts) {
+      var list = [];
+      for (var key in default_texts) {
+        if (default_texts.hasOwnProperty(key)) {
+          var value = default_texts[key];
+          if (value.length > 150) {
+            value = value.substr(0, 150) + "...";
+          }
+          list.push({'key': key, 'value': value});
+        }
+      }
+
+      $scope.default_texts = default_texts;
+      $scope.custom_texts_selector = $filter('orderBy')(list, 'value');
     });
   };
 
-  $scope.fileExists = function (filename) {
-    for (var i=0; i<$scope.staticfiles.length; i++) {
-      if ($scope.staticfiles[i].filename === filename) {
-        return true;
-      }
-    }
-    return false;
+  $scope.get_l10n($scope.vars.language_to_customize);
+
+  $scope.files = [];
+
+  $scope.toggleLangSelect = function() {
+    $scope.showLangSelect = true;
   };
 
-  $scope.uploadfinished = function () {
-    $scope.update_static_files();
+  $scope.langNotEnabledFilter = function(lang_obj) {
+    return $scope.admin.node.languages_enabled.indexOf(lang_obj.code) == -1;
   };
 
-  $scope.delete_resource = function (url, refresh) {
-    return $http['delete'](url).success(function () {
-      if (refresh) {
-        $scope.$emit("REFRESH");
-      }
+  $scope.enableLanguage = function(lang_obj) {
+    $scope.admin.node.languages_enabled.push(lang_obj.code)
+  };
+
+  $scope.removeLang = function(idx, lang_code) {
+    if (lang_code === $scope.admin.node.default_language) { return; }
+    $scope.admin.node.languages_enabled.splice(idx, 1);
+  };
+
+  $scope.update_files = function () {
+    var updated_files = Files.query(function () {
+      $scope.files = updated_files;
     });
   };
 
   $scope.delete_file = function (url) {
-    $http['delete'](url).success(function () {
-      $scope.update_static_files();
+    $http.delete(url).then(function () {
+      $scope.update_files();
+
+      $scope.$emit("REFRESH");
     });
   };
 
-  $scope.update_static_files();
+  $scope.update_files();
 }]).
-controller('AdminAdvancedCtrl', ['$scope', '$uibModal',
-  function($scope, $uibModal){
+controller('AdminHomeCtrl', ['$scope', function($scope) {
+  $scope.displayNum = 10;
+  $scope.showMore = function() {
+    $scope.displayNum = undefined;
+  }
+}]).
+controller('AdminAdvancedCtrl', ['$scope', '$uibModal', 'CONSTANTS',
+  function($scope, $uibModal, CONSTANTS){
   $scope.tabs = [
     {
       title:"Main configuration",
       template:"views/admin/advanced/tab1.html"
     },
     {
-      title:"HTTPS settings",
+      title:"URL shortener",
       template:"views/admin/advanced/tab2.html"
     },
-    {
+  ];
+
+  if ($scope.admin.node.root_tenant) {
+    $scope.tabs.push({
       title:"Anomaly detection thresholds",
       template:"views/admin/advanced/tab3.html"
-    }
-  ];
+    });
+  }
+
 
   $scope.open_modal_allow_unencrypted = function() {
     if (!$scope.admin.node.allow_unencrypted) {
@@ -238,46 +174,73 @@ controller('AdminAdvancedCtrl', ['$scope', '$uibModal',
 
     var modalInstance = $uibModal.open({
       templateUrl: 'views/partials/disable_encryption.html',
-      controller: 'DisableEncryptionCtrl'
+      controller: 'ModalCtrl'
     });
 
     modalInstance.result.then(function(result){
       $scope.admin.node.allow_unencrypted = result;
     });
   };
+
+  $scope.shortener_shorturl_regexp = CONSTANTS.shortener_shorturl_regexp;
+  $scope.shortener_longurl_regexp = CONSTANTS.shortener_longurl_regexp;
+
+  $scope.new_shorturl = {};
+
+  $scope.add_shorturl = function() {
+    var shorturl = new $scope.admin_utils.new_shorturl();
+
+    shorturl.shorturl = $scope.new_shorturl.shorturl;
+    shorturl.longurl = $scope.new_shorturl.longurl;
+
+    shorturl.$save(function(new_shorturl){
+      $scope.admin.shorturls.push(new_shorturl);
+      $scope.new_shorturl = {};
+    });
+  };
 }]).
-controller('AdminMailCtrl', ['$scope', '$http', 'Admin', 'AdminNotificationResource', 
-  function($scope, $http, Admin, AdminNotificationResource){
-  $scope.notif = Admin.notification;
-  
+controller('AdminShorturlEditCtrl', ['$scope', 'AdminShorturlResource',
+  function($scope, AdminShorturlResource) {
+    $scope.delete_shorturl = function(shorturl) {
+      AdminShorturlResource.delete({
+        id: shorturl.id
+      }, function(){
+        var idx = $scope.admin.shorturls.indexOf(shorturl);
+        $scope.admin.shorturls.splice(idx, 1);
+      });
+    };
+}]).
+controller('AdminMailCtrl', ['$scope', '$http', 'Utils', 'AdminNotificationResource',
+  function($scope, $http, Utils, AdminNotificationResource){
+
   $scope.tabs = [
     {
       title:"Main configuration",
       template:"views/admin/mail/tab1.html"
     },
     {
-      title:"Admin notification templates",
+      title:"Notification templates",
       template:"views/admin/mail/tab2.html"
-    },
-    {
-      title:"Recipient notification templates",
-      template:"views/admin/mail/tab3.html"
-    },
-    {
-      title:"Exception notification",
-      template:"views/admin/mail/tab4.html"
     }
   ];
 
   var sendTestMail = function() {
     $http({
       method: 'POST',
-      url: '/admin/notification/mail', 
+      url: '/admin/notification/mail',
     });
   };
 
   $scope.updateThenTestMail = function() {
     AdminNotificationResource.update($scope.admin.notification)
     .$promise.then(function() { sendTestMail(); }, function() { });
+  };
+}]).
+controller('AdminReviewModalCtrl', ['$scope', '$uibModalInstance', 'targetFunc',
+  function($scope, $uibModalInstance, targetFunc) {
+  $scope.cancel = $uibModalInstance.close;
+
+  $scope.ok = function() {
+    return targetFunc().then($uibModalInstance.close);
   };
 }]);

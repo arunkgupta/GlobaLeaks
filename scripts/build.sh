@@ -11,18 +11,20 @@ usage() {
   echo "Valid options:"
   echo " -h"
   echo -e " -t tagname (build specific release/branch)"
-  echo -e " -d distribution (available: precise, trusty, wheezy, jessie)"
+  echo -e " -l (Use local repository & enviroment)"
+  echo -e " -d distribution (available: trusty, xenial, wheezy, jessie, stretch)"
   echo -e " -n (do not sign)"
   echo -e " -p (push on repository)"
 }
 
-TARGETS="precise trusty xenial wheezy jessie stretch"
+TARGETS="trusty xenial wheezy jessie stretch"
 DISTRIBUTION="trusty"
 TAG="master"
+LOCAL_ENV=0
 NOSIGN=0
 PUSH=0
 
-while getopts "d:t:np:h" opt; do
+while getopts "d:t:np:h:l" opt; do
   case $opt in
     d) DISTRIBUTION="$OPTARG"
     ;;
@@ -31,6 +33,8 @@ while getopts "d:t:np:h" opt; do
     n) NOSIGN=1
     ;;
     p) PUSH=1
+    ;;
+    l) LOCAL_ENV=1
     ;;
     h)
         usage
@@ -59,7 +63,7 @@ do
   if which $REQ >/dev/null; then
     echo " + $REQ requirement meet"
   else
-    ERR=$(($ERR+1))
+    ERR=$((ERR+1))
     echo " - $REQ requirement not meet"
   fi
 done
@@ -70,18 +74,28 @@ if [ $ERR -ne 0 ]; then
   exit 1
 fi
 
+ROOTDIR=$(pwd)
+
 BUILDSRC="GLRelease"
 [ -d $BUILDSRC ] && rm -rf $BUILDSRC
 mkdir $BUILDSRC && cd $BUILDSRC
-git clone https://github.com/globaleaks/GlobaLeaks.git
-cd GlobaLeaks
-git checkout $TAG
-cd client
-npm install grunt-cli
-npm install
-./node_modules/grunt-cli/bin/grunt setupDependencies
-grunt build
-cd ../../../
+
+if [ $LOCAL_ENV -eq 1 ]; then
+  cd ../client/
+  ./node_modules/grunt/bin/grunt build
+  cd ../GLRelease
+  git clone --branch="$TAG" --depth=1 file://$(pwd)/../../GlobaLeaks
+  cp -rf ../client/build GlobaLeaks/client/
+else
+  git clone https://github.com/globaleaks/GlobaLeaks.git
+  cd GlobaLeaks
+  git checkout $TAG
+  cd client
+  npm install
+  ./node_modules/grunt/bin/grunt build
+fi
+
+cd $ROOTDIR
 
 for TARGET in $TARGETS; do
   echo "Packaging GlobaLeaks for:" $TARGET
@@ -92,8 +106,12 @@ for TARGET in $TARGETS; do
 
   cp -r $BUILDSRC $BUILDDIR
   cd $BUILDDIR/GlobaLeaks
-  rm debian/control
-  ln -s controlX/control.$TARGET debian/control
+
+  rm debian/control backend/requirements.txt
+
+  cp debian/controlX/control.$TARGET  debian/control
+  cp backend/requirements/requirements-$TARGET.txt backend/requirements.txt
+
   sed -i "s/stable; urgency=/$TARGET; urgency=/g" debian/changelog
 
   if [ $NOSIGN -eq 1 ]; then

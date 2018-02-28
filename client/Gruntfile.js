@@ -4,20 +4,16 @@ module.exports = function(grunt) {
   var fs = require('fs'),
       path = require('path'),
       superagent = require('superagent'),
-      Gettext = require("node-gettext");
+      Gettext = require('node-gettext');
 
   var fileToDataURI = function(filepath) {
     try {
       var mimeMap = {
         'css': 'text/css',
-        'eot': 'application/vnd.ms-fontobject',
         'ico': 'image/x-icon',
-        'js': 'text/javascript',
+        'js': 'application/javascript',
         'png': 'image/png',
-        'svg': 'application/svg+xml',
-        'ttf': 'application/x-font-ttf',
-        'woff': 'application/woff',
-        'woff2': 'application/woff2'
+        'woff': 'application/woff'
       }
 
       var ext = filepath.split('.').pop();
@@ -33,33 +29,57 @@ module.exports = function(grunt) {
   };
 
   grunt.initConfig({
-    bower: {
-      install: {
-        options: {
-          copy: false
-        }
-      }
-    },
-
     eslint: {
       src: [
         'Gruntfile.js',
         'app/js/**/*.js',
-        '!app/js/crypto/*.js',
-        'app/js/crypto/proof-of-work.worker.js',
+        '!app/js/lib/*.js',
+        '!app/js/locale/*.js',
+        '!app/js/crypto/lib/*.js',
         'tests/**/*.js'
       ]
     },
 
     clean: {
-      build: ['tmp', 'build']
+      all: ['tmp', 'build']
     },
 
     copy: {
+      sources: {
+        files: [
+          { dest: 'app/css', cwd: '.', src: ['node_modules/bootstrap-inline-rtl/dist/css/bootstrap.css'], expand: true, flatten: true },
+          { dest: 'app/css', cwd: '.', src: ['node_modules/ui-select/dist/select.min.css'], expand: true, flatten: true },
+          { dest: 'app/fonts', cwd: '.', src: ['node_modules/bootstrap-inline-rtl/fonts/*'], expand: true, flatten: true },
+          { dest: 'app/js/locale', cwd: '.', src: ['node_modules/angular-i18n/angular-locale*'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/stacktrace-js/dist/stacktrace.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/scrypt-async/scrypt-async.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/openpgp/dist/openpgp.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular/angular.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-aria/angular-aria.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-filter/dist/angular-filter.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-resource/angular-resource.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-route/angular-route.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-sanitize/angular-sanitize.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-translate/dist/angular-translate.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-translate-loader-url/angular-translate-loader-url.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-translate-loader-static-files/angular-translate-loader-static-files.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-ui-bootstrap/dist/ui-bootstrap-tpls.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/d3/build/d3.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/file-saver/FileSaver.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-file-saver/dist/angular-file-saver.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/@flowjs/flow.js/dist/flow.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/@flowjs/ng-flow/dist/ng-flow.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/zxcvbn/dist/zxcvbn.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-zxcvbn/dist/angular-zxcvbn.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/angular-dynamic-locale/tmhDynamicLocale.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/lib/', cwd: '.', src: ['node_modules/ui-select/dist/select.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/crypto/lib/', cwd: '.', src: ['node_modules/openpgp/dist/openpgp.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/crypto/lib/', cwd: '.', src: ['node_modules/openpgp/dist/openpgp.worker.min.js'], expand: true, flatten: true },
+          { dest: 'app/js/crypto/lib/', cwd: '.', src: ['node_modules/scrypt-async/scrypt-async.min.js'], expand: true, flatten: true }
+        ]
+      },
       build: {
-          files: [{
-            dest: 'tmp/', cwd: 'app/', src: ['**'], expand: true
-          }]
+        files: [{ dest: 'tmp/', cwd: 'app/', src: ['**'], expand: true }]
       },
       end2end_coverage: {
           files: [{
@@ -67,8 +87,10 @@ module.exports = function(grunt) {
             cwd: 'app/',
             src: [
               '**',
-              '!js/**/*.js', // Don't copy scripts that will be instrumented.
-              'js/crypto/**/*.js' // Copy scripts that should not be instrumented.
+              '!js/**/*.js', // Don't copy scripts that will be instrumented,
+              'js/lib/*.js', // and copy scripts that should not be instrumented.
+              'js/locale/*.js',
+              'js/crypto/lib/*.js'
             ],
             expand: true
           }]
@@ -77,8 +99,7 @@ module.exports = function(grunt) {
 
     useminPrepare: {
       html: [
-        'tmp/index.html',
-        'tmp/app.html'
+        'tmp/index.html'
       ],
       options: {
         staging: 'tmp',
@@ -96,7 +117,6 @@ module.exports = function(grunt) {
     usemin: {
       html: [
         'tmp/index.html',
-        'tmp/app.html',
         'tmp/views/**/*.html'
       ],
       options: {
@@ -116,35 +136,18 @@ module.exports = function(grunt) {
           base: 'app/',
           quotes: 'single'
         },
-        src: ['app.html', 'views/**/*.html'],
+        src: ['views/**/*.html'],
         dest: 'tmp/js/templates.js'
       }
-    },
-
-    protractor: {
-      options: {
-        keepAlive: true,
-        noColor: false,
-        singleRun: true
-      },
-      test: {
-        configFile: "tests/end2end/protractor.config.js"
-      },
-      saucelabs: {
-        configFile: "tests/end2end/protractor-sauce.config.js",
-        options: {
-          build: process.env.TRAVIS_BUILD_NUMBER,
-        },
-      },
     },
 
     mochaTest: {
       test: {
         options: {
-          timeout: 30000, 
+          timeout: 30000,
           reporter: 'list',
         },
-        src: ['tests/api/test_*.js'],
+        src: ['tests/api/test.js'],
       },
     },
 
@@ -166,51 +169,19 @@ module.exports = function(grunt) {
               replacement: 'start_globaleaks();'
             },
             {
-              pattern: 'components/bowser/bowser.min.js',
+              pattern: "src: url('../fonts/glyphicons-halflings-regular.eot');",
+              replacement: ''
+            },
+            {
+              pattern: "src: url('../fonts/glyphicons-halflings-regular.eot?#iefix') format('embedded-opentype'), url('../fonts/glyphicons-halflings-regular.woff2') format('woff2'), url('../fonts/glyphicons-halflings-regular.woff') format('woff'), url('../fonts/glyphicons-halflings-regular.ttf') format('truetype'), url('../fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular') format('svg');",
               replacement: function () {
-                return fileToDataURI('app/components/bowser/bowser.min.js')
+                return "src: url('" + fileToDataURI('tmp/fonts/glyphicons-halflings-regular.woff') + "') format('woff');";
               }
             },
             {
-              pattern: '../fonts/glyphicons-halflings-regular.eot',
-              replacement: function () {
-                return fileToDataURI('app/components/bootstrap-inline-rtl/fonts/glyphicons-halflings-regular.eot');
-              }
-            },
-            {
-              pattern: '../fonts/glyphicons-halflings-regular.eot?#iefix',
-              replacement: function () {
-                return fileToDataURI('app/components/bootstrap-inline-rtl/fonts/glyphicons-halflings-regular.eot');
-              }
-            },
-            {
-              pattern: '../fonts/glyphicons-halflings-regular.woff2',
-              replacement: function () {
-                return fileToDataURI('app/components/bootstrap-inline-rtl/fonts/glyphicons-halflings-regular.woff2');
-              }
-            },
-            {
-              pattern: '../fonts/glyphicons-halflings-regular.woff',
-              replacement: function () {
-                return fileToDataURI('app/components/bootstrap-inline-rtl/fonts/glyphicons-halflings-regular.woff');
-              }
-            },
-            {
-              pattern: '../fonts/glyphicons-halflings-regular.ttf',
-              replacement: function () {
-                return fileToDataURI('app/components/bootstrap-inline-rtl/fonts/glyphicons-halflings-regular.ttf');
-              }
-            },
-            {
-              pattern: '../fonts/glyphicons-halflings-regular.svg',
-              replacement: function () {
-                return fileToDataURI('app/components/bootstrap-inline-rtl/fonts/glyphicons-halflings-regular.svg');
-              }
-            },
-            {
-              pattern: /inlinefiles\/([^\'\"\)]+)*/g,
+              pattern: /js\/locale\/([^'")]+)*/g,
               replacement: function (match) {
-                return fileToDataURI('app/' + match);
+                return fileToDataURI('tmp/' + match);
               }
             }
           ]
@@ -230,6 +201,36 @@ module.exports = function(grunt) {
             }
           ]
         }
+      },
+      pass3: {
+        files: {
+          'tmp/js/crypto/scrypt-async.worker.js': 'tmp/js/crypto/scrypt-async.worker.js'
+        },
+        options: {
+          replacements: [
+            {
+              pattern: 'scrypt-async.min.js',
+              replacement: function () {
+                return fileToDataURI('tmp/js/crypto/scrypt-async.min.js');
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    compress: {
+      main: {
+        options: {
+          mode: 'gzip'
+        },
+        expand: true,
+        cwd: 'build/',
+        src: ['index.html', 'license.txt', 'js/*'],
+        dest: 'build/',
+        rename: function(dest, src) {
+          return dest + '/' + src + '.gz';
+        }
       }
     },
 
@@ -246,27 +247,26 @@ module.exports = function(grunt) {
     },
 
     instrument: {
-      files: 'js/**/*.js',
-      options: {
-        lazy: true,
-        cwd: 'app/',
-        basePath: 'build'
+      build: {
+        files: 'js/**/*.js',
+        options: {
+          lazy: true,
+          cwd: 'app/',
+          basePath: 'build/'
+        }
       }
     },
+
     protractor_coverage: {
-      options: {
-        keepAlive: true,
-        noColor: false,
-        coverageDir: 'coverage'
-      },
       local: {
         options: {
           configFile: 'tests/end2end/protractor-coverage.config.js'
         }
       }
     },
+
     makeReport: {
-      src: 'coverage/coverage*.json',
+      src: 'coverage/*.json',
       options: {
         type: 'lcov',
         dir: 'coverage',
@@ -280,53 +280,24 @@ module.exports = function(grunt) {
   //
   // the reasons is during time strangely the automating loading was causing problems.
   grunt.loadNpmTasks('grunt-angular-templates');
-  grunt.loadNpmTasks('grunt-bower-task');
   grunt.loadNpmTasks('grunt-confirm');
   grunt.loadNpmTasks('grunt-contrib-clean');
+  grunt.loadNpmTasks('grunt-contrib-compress');
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-connect');
   grunt.loadNpmTasks('grunt-contrib-copy');
   grunt.loadNpmTasks('grunt-istanbul');
   grunt.loadNpmTasks('grunt-protractor-coverage');
-  grunt.loadNpmTasks('grunt-protractor-runner');
   grunt.loadNpmTasks('grunt-string-replace');
   grunt.loadNpmTasks('grunt-usemin');
   grunt.loadNpmTasks('grunt-mocha-test');
   grunt.loadNpmTasks("gruntify-eslint");
 
-  var readDynamicStrings = function() {
-    var filecontent = grunt.file.read('app/data_src/dynamic_strings.json'),
-
-    ret = {};
-    ret['mapping'] = JSON.parse(filecontent);
-    ret['inverse_mapping'] = {};
-    for (var key in ret['mapping']) {
-      ret['inverse_mapping'][(ret['mapping'][key])] = key;
-    }
-
-    return ret;
-  };
-
   var readNoTranslateStrings = function() {
     return JSON.parse(grunt.file.read('app/data_src/notranslate_strings.json'));
   };
 
-  var dynamic_strings = readDynamicStrings(),
-      notranslate_strings = readNoTranslateStrings();
-
-  grunt.registerTask('copyBowerSources', function() {
-    var files = [
-      ['app/components/scrypt-async/scrypt-async.min.js', 'app/js/crypto/scrypt-async.min.js'],
-      ['app/components/openpgp/dist/openpgp.min.js', 'app/js/crypto/openpgp.min.js'],
-      ['app/components/openpgp/dist/openpgp.worker.min.js', 'app/js/crypto/openpgp.worker.min.js']
-    ];
-
-    grunt.file.mkdir('app/js/crypto');
-
-    for (var x in files) {
-        grunt.file.copy(files[x][0], files[x][1]);
-    }
-  });
+  var notranslate_strings = readNoTranslateStrings();
 
   grunt.registerTask('cleanupWorkingDirectory', function() {
     var x;
@@ -346,25 +317,19 @@ module.exports = function(grunt) {
 
     grunt.file.mkdir('build/');
 
-    var files = ['index.html', 'logo.png'];
-    for (x in files) {
-      grunt.file.copy('tmp/' + files[x], 'build/' + files[x]);
-    }
-
+    grunt.file.copy('tmp/index.html', 'build/index.html');
+    grunt.file.copy('tmp/license.txt', 'build/license.txt');
     grunt.file.copy('tmp/js/scripts.js', 'build/js/scripts.js');
     grunt.file.copy('tmp/js/plugin.js', 'build/js/plugin.js');
 
-    dirs = ['js/crypto'];
+    grunt.file.mkdir('build/js/crypto/');
+    grunt.file.copy('tmp/js/crypto/scrypt-async.worker.js', 'build/js/crypto/scrypt-async.worker.js');
 
     var copy_fun = function(absdir, rootdir, subdir, filename) {
       grunt.file.copy(absdir, path.join('build/' + dirs[x], subdir || '', filename || ''));
     };
 
-    for (x in dirs) {
-      grunt.file.recurse('tmp/' + dirs[x], copy_fun);
-    }
-
-    dirs = ['l10n', 'data'];
+    dirs = ['js/crypto/lib', 'l10n', 'data'];
     for (x in dirs) {
       grunt.file.recurse('tmp/' + dirs[x], copy_fun);
     }
@@ -410,7 +375,7 @@ module.exports = function(grunt) {
   }
 
   var agent = superagent.agent(),
-    baseurl = 'http://www.transifex.com/api/2/project/globaleaks',
+    baseurl = 'https://www.transifex.com/api/2/project/globaleaks',
     sourceFile = 'pot/en.po';
 
   function updateTxSource(cb){
@@ -497,21 +462,25 @@ module.exports = function(grunt) {
 
   function fetchTxTranslations(cb){
     var fetched_languages = 0,
-      total_languages, supported_languages = {};
+        total_languages,
+        supported_languages = {};
 
-    listLanguages(function(result){
-      result.available_languages = result.available_languages.filter(function( language ) {
-        /*
-            we skip en_US that is used internaly only as feedback in order
-            to keep track of corrections suggestions
-        */
-        return language.code !== 'en_US';
+    listLanguages(function(result) {
+      result.available_languages = result.available_languages.sort(function(a, b) {
+        if (a.code > b.code) {
+          return 1;
+        }
+
+        if (a.code < b.code) {
+          return -1;
+        }
+
+        return 0;
       });
 
       total_languages = result.available_languages.length;
 
-      result.available_languages.forEach(function(language){
-
+      var fetchLanguage = function(language) {
         fetchTxTranslationsForLanguage(language.code, function(content){
           if (content) {
             var potFile = "pot/" + language.code + ".po";
@@ -534,10 +503,13 @@ module.exports = function(grunt) {
             }
 
             cb(supported_languages);
+          } else {
+            fetchLanguage(result.available_languages[fetched_languages]);
           }
         });
+      };
 
-      });
+      fetchLanguage(result.available_languages[0]);
     });
   }
 
@@ -555,12 +527,7 @@ module.exports = function(grunt) {
         return;
       }
 
-      if (str in dynamic_strings['mapping']) {
-        str = dynamic_strings['mapping'][str];
-        gt.setTranslation("en", "", str, str);
-      } else {
-        gt.setTranslation("en", "", str, str);
-      }
+      gt.setTranslation("en", "", str, str);
 
       translationStringCount += 1;
     }
@@ -585,7 +552,7 @@ module.exports = function(grunt) {
 
     function extractStringsFromJSONFile(filepath) {
       var filecontent = grunt.file.read(filepath),
-        result;
+          result;
 
       result = translationStringRegexpJSON.exec(filecontent);
       while (result) {
@@ -600,7 +567,7 @@ module.exports = function(grunt) {
 
       for (var i=0; i<lines.length; i++){
         // we skip adding empty strings and variable only strings
-        if (lines[i] !== '' && !lines[i].match(/^%[a-zA-Z0-9]+%/g)) {
+        if (lines[i] !== '' && !lines[i].match(/^{[a-zA-Z0-9]+}/g)) {
           addString(lines[i]);
         }
       }
@@ -625,14 +592,18 @@ module.exports = function(grunt) {
       });
     }
 
-    extractStringsFromFile('app/app.html');
-    extractStringsFromFile('app/translations.html');
-    extractStringsFromFile('app/data_src/appdata.json');
-    extractStringsFromFile('app/data_src/field_attrs.json');
+    ['app/translations.html',
+     'app/data_src/appdata.json',
+     'app/data_src/field_attrs.json'].forEach(function(file) {
+      extractStringsFromFile(file);
+    });
 
-    extractStringsFromDir('app/views');
-    extractStringsFromDir('app/data_src/txt');
-    extractStringsFromDir('app/data_src/fields');
+    ['app/views',
+     'app/data_src/questionnaires',
+     'app/data_src/questions',
+     'app/data_src/txt'].forEach(function(dir) {
+      extractStringsFromDir(dir);
+    });
 
     grunt.file.mkdir("pot");
 
@@ -642,9 +613,7 @@ module.exports = function(grunt) {
   });
 
   grunt.registerTask('☠☠☠pushTranslationsSource☠☠☠', function() {
-    var done = this.async();
-
-    updateTxSource(done);
+    updateTxSource(this.async());
   });
 
   grunt.registerTask('fetchTranslations', function() {
@@ -652,14 +621,6 @@ module.exports = function(grunt) {
       gt = new Gettext(),
       fileContents = fs.readFileSync("pot/en.po"),
       lang_code;
-
-    function addTranslation(translations, key, value) {
-      if (key in dynamic_strings['inverse_mapping']) {
-        key = dynamic_strings['inverse_mapping'][key];
-      }
-
-      translations[key] = value;
-    }
 
     fetchTxTranslations(function(supported_languages) {
       gt.addTextdomain("en", fileContents);
@@ -669,12 +630,11 @@ module.exports = function(grunt) {
         var translations = {}, output;
 
         for (var i = 0; i < strings.length; i++) {
-          var string = strings[i];
           gt.addTextdomain(lang_code, fs.readFileSync("pot/" + lang_code + ".po"));
-          addTranslation(translations, string, str_unescape(gt.dgettext(lang_code, str_escape(string))));
+          translations[strings[i]] = str_unescape(gt.dgettext(lang_code, str_escape(strings[i])));
         }
 
-        output = JSON.stringify(translations);
+        output = JSON.stringify(translations, null, 2);
 
         fs.writeFileSync("app/l10n/" + lang_code + ".json", output);
       }
@@ -685,142 +645,220 @@ module.exports = function(grunt) {
 
   grunt.registerTask('makeAppData', function() {
     var done = this.async(),
-      gt = new Gettext(),
-      fileContents = fs.readFileSync("pot/en.po"),
-      lang_code;
+        gt = new Gettext(),
+        fileContents = fs.readFileSync("pot/en.po"),
+        supported_languages = [];
 
-    fetchTxTranslations(function(supported_languages) {
-      var json = JSON.parse(fs.readFileSync("app/data_src/appdata.json")),
-          output = {},
-          version = json['version'],
-          default_questionnaire = json['default_questionnaire'],
-          templates = json['templates'],
-          templates_sources = {};
+    grunt.file.recurse('pot/', function(absdir, rootdir, subdir, filename) {
+      supported_languages.push(filename.replace(/.po$/, ""));
+    });
 
-      var translate_object = function(object, keys) {
-        for (var k in keys) {
-          for (lang_code in supported_languages) {
-            object[keys[k]][lang_code] = str_unescape(gt.dgettext(lang_code, str_escape(object[keys[k]]['en'])));
+    var appdata = JSON.parse(fs.readFileSync("app/data_src/appdata.json")),
+        output = {},
+        version = appdata['version'],
+        templates = appdata['templates'],
+        templates_sources = {};
+
+    var translate_object = function(object, keys) {
+      for (var k in keys) {
+        supported_languages.forEach(function(lang_code) {
+          var translation = gt.dgettext(lang_code, str_escape(object[keys[k]]['en']));
+          if (translation !== undefined) {
+            object[keys[k]][lang_code] = str_unescape(translation).trim();
           }
-        }
-      };
+        });
+      }
+    };
 
-      var translate_field = function(field) {
-        var i;
-        translate_object(field, ['label', 'description', 'hint', 'multi_entry_hint']);
+    var translate_field = function(field) {
+      var i;
+      translate_object(field, ['label', 'description', 'hint', 'multi_entry_hint']);
 
-        for (i in field['attrs']) {
-          translate_object(field['attrs'][i], ['value']);
-        }
-
-        for (i in field['options']) {
-          translate_object(field['options'][i], ['label']);
-        }
-
-        for (i in field['children']) {
-          translate_field(field['children'][i]);
-        }
-      };
-
-      var translate_step = function(step) {
-        translate_object(step, ['label', 'description']);
-
-        for (var c in step['children']) {
-          translate_field(step['children'][c]);
-        }
-      };
-
-      var translate_questionnaire = function(questionnaire) {
-        for (var s in questionnaire) {
-          translate_step(questionnaire[s]);
-        }
-      };
-
-      gt.addTextdomain("en", fileContents);
-
-      for (lang_code in supported_languages) {
-        gt.addTextdomain(lang_code, fs.readFileSync("pot/" + lang_code + ".po"));
+      for (i in field['attrs']) {
+        translate_object(field['attrs'][i], ['value']);
       }
 
-      grunt.file.recurse('app/data_src/txt', function(absdir, rootdir, subdir, filename) {
-        var template_name = filename.split('.txt')[0],
-            filepath = path.join('app/data_src/txt', subdir || '', filename || '');
+      for (i in field['options']) {
+        translate_object(field['options'][i], ['label']);
+      }
 
-        templates_sources[template_name] = grunt.file.read(filepath);
+      for (i in field['children']) {
+        translate_field(field['children'][i]);
+      }
+    };
+
+    var translate_step = function(step) {
+      translate_object(step, ['label', 'description']);
+
+      for (var c in step['children']) {
+        translate_field(step['children'][c]);
+      }
+    };
+
+    var translate_questionnaire = function(questionnaire) {
+      questionnaire['steps'].forEach(function(step) {
+        translate_step(step);
       });
+    };
 
-      for (lang_code in supported_languages) {
-        for (var template_name in templates_sources) {
-          /* Skip to add these templates cause we still miss the database of storing them */
-          if (['admin_test_email_title', 'admin_test_email_template'].indexOf(template_name) !== -1) {
+    gt.addTextdomain("en", fileContents);
+
+    grunt.file.recurse('app/data_src/txt', function(absdir, rootdir, subdir, filename) {
+      var template_name = filename.split('.txt')[0],
+          filepath = path.join('app/data_src/txt', subdir || '', filename || '');
+
+      templates_sources[template_name] = grunt.file.read(filepath);
+    });
+
+    supported_languages.forEach(function(lang_code) {
+      gt.addTextdomain(lang_code, fs.readFileSync("pot/" + lang_code + ".po"));
+
+      for (var template_name in templates_sources) {
+        if (!(template_name in templates)) {
+          templates[template_name] = {};
+        }
+
+        var tmp = templates_sources[template_name];
+
+        var lines = templates_sources[template_name].split("\n");
+
+        for (var i=0; i<lines.length; i++) {
+          var translation = gt.dgettext(lang_code, str_escape(lines[i]));
+          if (translation === undefined) {
             continue;
           }
 
-          if (!(template_name in templates)) {
-            templates[template_name] = {};
+          // we skip adding empty strings and variable only strings
+          if (lines[i] !== '' && !lines[i].match(/^{[a-zA-Z0-9]+}/g)) {
+            tmp = tmp.replace(lines[i], str_unescape(translation));
           }
-
-          var tmp = templates_sources[template_name];
-
-          var lines = templates_sources[template_name].split("\n");
-
-          for (var i=0; i<lines.length; i++){
-
-            // we skip adding empty strings and variable only strings
-            if (lines[i] !== '' && !lines[i].match(/^%[a-zA-Z0-9]+%/g)) {
-              tmp = tmp.replace(lines[i], str_unescape(gt.dgettext(lang_code, str_escape(lines[i]))));
-            }
-          }
-
-          templates[template_name][lang_code] = tmp;
         }
+
+        templates[template_name][lang_code] = tmp.trim();
       }
-
-      output['version'] = version;
-      output['default_questionnaire'] = default_questionnaire;
-      output['templates'] = templates;
-      output['node'] = {};
-
-      for (var k in json['node']) {
-        output['node'][k] = {};
-        for (lang_code in supported_languages) {
-          output['node'][k][lang_code] = str_unescape(gt.dgettext(lang_code, str_escape(json['node'][k]['en'])));
-        }
-      }
-
-      translate_questionnaire(output['default_questionnaire']['steps']);
-
-      output = JSON.stringify(output);
-
-      fs.writeFileSync("app/data/appdata.json", output);
-
-      grunt.file.recurse('app/data_src/fields', function(absdir, rootdir, subdir, filename) {
-        var srcpath = path.join('app/data_src/fields', subdir || '', filename || '');
-        var dstpath = path.join('app/data/fields', subdir || '', filename || '');
-        var field = JSON.parse(fs.readFileSync(srcpath));
-        translate_field(field);
-        field = JSON.stringify(field);
-        fs.writeFileSync(dstpath, field);
-      });
-
-      grunt.file.copy('app/data_src/field_attrs.json', 'app/data/field_attrs.json');
-
-      done();
     });
 
+    output['version'] = version;
+    output['templates'] = templates;
+    output['node'] = {};
+
+    for (var k in appdata['node']) {
+      output['node'][k] = {};
+      supported_languages.forEach(function(lang_code) {
+        output['node'][k][lang_code] = str_unescape(gt.dgettext(lang_code, str_escape(appdata['node'][k]['en'])));
+      });
+    }
+
+    output = JSON.stringify(output, null, 2);
+
+    fs.writeFileSync("app/data/appdata.json", output);
+
+    grunt.file.recurse('app/data_src/questionnaires', function(absdir, rootdir, subdir, filename) {
+      var srcpath = path.join('app/data_src/questionnaires', subdir || '', filename || '');
+      var dstpath = path.join('app/data/questionnaires', subdir || '', filename || '');
+      var questionnaire = JSON.parse(fs.readFileSync(srcpath));
+      translate_questionnaire(questionnaire);
+      fs.writeFileSync(dstpath, JSON.stringify(questionnaire, null, 2));
+    });
+
+    grunt.file.recurse('app/data_src/questions', function(absdir, rootdir, subdir, filename) {
+      var srcpath = path.join('app/data_src/questions', subdir || '', filename || '');
+      var dstpath = path.join('app/data/questions', subdir || '', filename || '');
+      var field = JSON.parse(fs.readFileSync(srcpath));
+      translate_field(field);
+      fs.writeFileSync(dstpath, JSON.stringify(field, null, 2));
+    });
+
+    grunt.file.copy('app/data_src/field_attrs.json', 'app/data/field_attrs.json');
+
+    done();
   });
 
-  grunt.registerTask('setupDependencies', ['bower:install', 'copyBowerSources']);
+  grunt.registerTask('verifyAppData', function() {
+    var app_data = JSON.parse(fs.readFileSync('app/data/appdata.json'));
+    var var_map = JSON.parse(fs.readFileSync('app/data/templates_descriptor.json'));
+
+    var failures = [];
+
+    function recordFailure(template_name, lang, text, msg) {
+      var line = template_name + " : "+ lang + " : " + msg;
+      failures.push(line);
+    }
+
+    function checkIfRightTagsUsed(variables, lang, text, template_name, expected_tags) {
+      expected_tags.forEach(function(tag) {
+        if (text.indexOf(tag) == -1) {
+          recordFailure(template_name, lang, text, 'missing expected tag: ' + tag);
+        }
+      });
+    }
+
+    function checkForBrokenTags(variables, lang, text, template_name) {
+      var open_b = (text.match(/{/g) || []).length;
+      var close_b = (text.match(/{/g) || []).length;
+
+      var tags = text.match(/{[A-Z][a-zA-Z]+}/g) || [];
+
+      if (open_b !== close_b) {
+        recordFailure(template_name, lang, text, 'brackets misaligned');
+      }
+      if (open_b !== tags.length) {
+        recordFailure(template_name, lang, text, 'malformed tags');
+      }
+
+      // Check to see there are no other commonly used tags inside like: () [] %%, {{}}
+      if (text.match(/\([A-Z][a-zA-Z]+\)/g) !== null ||
+          text.match(/\[[A-Z][a-zA-Z]+\]/g) !== null ||
+          text.match(/%[A-Z][a-zA-Z]+%/g) !== null ||
+          text.match(/{{[A-Z][a-zA-Z]+}}/g) !== null) {
+        recordFailure(template_name, lang, text, 'mistaken variable tags');
+      }
+
+      tags.forEach(function(tag) {
+        if (variables.indexOf(tag) < 0) {
+          recordFailure(template_name, lang, text, 'invalid tag ' + tag);
+        }
+      });
+    }
+
+    // Check_for_missing_templates
+    for (var template_name in var_map) {
+      var lang_map = app_data['templates'][template_name]
+      var variables = var_map[template_name];
+      var expected_tags = (lang_map['en'].match(/{[A-Z][a-zA-Z]+}/g) || []);
+
+      for (var lang in lang_map) {
+        var text = lang_map[lang];
+        checkIfRightTagsUsed(variables, lang, text, template_name, expected_tags);
+        checkForBrokenTags(variables, lang, text, template_name);
+        // TODO Search for ://
+        // TODO Check for html elements and other evil strings
+      }
+    }
+
+    if (failures.length !== 0) {
+      failures.forEach(function(failure) {
+        console.log(failure);
+      });
+
+      grunt.fail.warn("verifyAppData task failure");
+    } else {
+      console.log('Successfully verified');
+    }
+  });
+
+  grunt.registerTask('includeExternalFiles', function() {
+      fs.writeFileSync('tmp/LICENSE', grunt.file.read('../LICENSE'));
+  });
 
   // Run this task to push translations on transifex
   grunt.registerTask('pushTranslationsSource', ['confirm', '☠☠☠pushTranslationsSource☠☠☠']);
 
-  // Run this task to fetch translations from transifex and create appliccation files
-  grunt.registerTask('updateTranslations', ['fetchTranslations', 'makeAppData']);
-
+  // Run this task to fetch translations from transifex and create application files
+  grunt.registerTask('updateTranslations', ['fetchTranslations', 'makeAppData', 'verifyAppData']);
   // Run this to build your app. You should have run updateTranslations before you do so, if you have changed something in your translations.
   grunt.registerTask('build',
-    ['clean:build', 'copy:build', 'ngtemplates', 'useminPrepare', 'concat', 'usemin', 'string-replace', 'cleanupWorkingDirectory']);
+    ['clean', 'copy:sources', 'copy:build', 'includeExternalFiles', 'ngtemplates', 'useminPrepare', 'concat', 'usemin', 'string-replace', 'cleanupWorkingDirectory', 'compress']);
 
   grunt.registerTask('generateCoverallsJson', function() {
     var done = this.async();
@@ -853,7 +891,7 @@ module.exports = function(grunt) {
           }
 
           var dstpath = 'coverage/coveralls.json';
-          fs.writeFileSync(dstpath, JSON.stringify(coverallsJson));
+          fs.writeFileSync(dstpath, JSON.stringify(coverallsJson, null, 2));
 
           grunt.verbose.ok("Successfully converted " + fileName + " to coveralls json.");
           done();
@@ -862,12 +900,15 @@ module.exports = function(grunt) {
     });
   });
 
-  grunt.registerTask('end2end-coverage', [
-    'clean:build',
+  grunt.registerTask('end2end-coverage-instrument', [
+    'clean',
+    'copy:sources',
     'copy:end2end_coverage',
-    'instrument',
-    'protractor_coverage:local',
+    'instrument'
+  ]);
+
+  grunt.registerTask('end2end-coverage-report', [
     'makeReport',
-    'generateCoverallsJson',
+    'generateCoverallsJson'
   ]);
 };

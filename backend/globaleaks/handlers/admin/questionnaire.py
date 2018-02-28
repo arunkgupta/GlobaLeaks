@@ -1,118 +1,78 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #
 #   /admin/questionnaires
 #   *****
 # Implementation of the code executed on handler /admin/questionnaires
 #
-import copy
+from twisted.internet.defer import inlineCallbacks, returnValue
 
-from twisted.internet.defer import inlineCallbacks
-
-from globaleaks import models
-from globaleaks.orm import transact, transact_ro
-from globaleaks.handlers.base import BaseHandler
-from globaleaks.handlers.admin.field import db_import_fields
+from globaleaks import models, QUESTIONNAIRE_EXPORT_VERSION
 from globaleaks.handlers.admin.step import db_create_step
-from globaleaks.handlers.node import serialize_step, serialize_questionnaire
-from globaleaks.rest import errors, requests
-from globaleaks.rest.apicache import GLApiCache
-from globaleaks.utils.structures import fill_localized_keys, get_localized_values
-from globaleaks.utils.utility import log, datetime_now, datetime_to_ISO8601
+from globaleaks.handlers.base import BaseHandler
+from globaleaks.handlers.public import serialize_questionnaire
+from globaleaks.orm import transact
+from globaleaks.rest import requests
+from globaleaks.utils.structures import fill_localized_keys
+from globaleaks.utils.utility import datetime_to_ISO8601, datetime_now
 
 
-@transact_ro
-def get_questionnaire_list(store, language):
+def db_get_questionnaire_list(session, tid, language):
+    questionnaires = session.query(models.Questionnaire).filter(models.Questionnaire.tid.in_(set([1, tid])))
+
+    return [serialize_questionnaire(session, tid, questionnaire, language) for questionnaire in questionnaires]
+
+
+@transact
+def get_questionnaire_list(session, tid, language):
     """
     Returns the questionnaire list.
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param language: the language in which to localize data.
     :return: a dictionary representing the serialization of the questionnaires.
     """
-    return [serialize_questionnaire(store, questionnaire, language)
-        for questionnaire in store.find(models.Questionnaire)]
+    return db_get_questionnaire_list(session, tid, language)
 
 
-@transact_ro
-def get_questionnaire(store, questionnaire_id, language):
+def db_get_questionnaire(session, tid, questionnaire_id, language):
     """
     Returns:
         (dict) the questionnaire with the specified id.
     """
-    questionnaire = store.find(models.Questionnaire, models.Questionnaire.id == questionnaire_id).one()
+    questionnaire = models.db_get(session, models.Questionnaire, models.Questionnaire.tid.in_(set([1, tid])), models.Questionnaire.id == questionnaire_id)
 
-    if not questionnaire:
-        log.err("Requested invalid questionnaire")
-        raise errors.QuestionnaireIdNotFound
-
-    return serialize_questionnaire(store, questionnaire, language)
+    return serialize_questionnaire(session, tid, questionnaire, language)
 
 
-def db_get_default_questionnaire_id(store):
-    return store.find(models.Questionnaire, models.Questionnaire.key == u'default').one().id
+@transact
+def get_questionnaire(session, tid, questionnaire_id, language):
+    return db_get_questionnaire(session, tid, questionnaire_id, language)
 
 
-def db_get_questionnaire_steps(store, questionnaire_id, language):
-    """
-    Returns:
-        (dict) the questionnaire associated with the questionnaire with the specified id.
-    """
-    questionnaire = store.find(models.Questionnaire, models.Questionnaire.id == questionnaire_id).one()
-
-    if not questionnaire:
-        log.err("Requested invalid questionnaire")
-        raise errors.QuestionnaireIdNotFound
-
-    return [serialize_step(store, s, language) for s in questionnaire.steps]
-
-
-@transact_ro
-def get_questionnaire_steps(*args):
-    return db_get_questionnaire_steps(*args)
-
-
-def fill_questionnaire_request(request, language):
+def db_update_questionnaire(session, questionnaire, request, language):
     fill_localized_keys(request, models.Questionnaire.localized_keys, language)
-    return request
-
-def db_update_questionnaire(store, questionnaire, request, language):
-    request = fill_questionnaire_request(request, language)
 
     questionnaire.update(request)
 
     return questionnaire
 
 
-def db_create_steps(store, questionnaire, steps, language):
-    """
-    Create the specified steps
-    :param store: the store on which perform queries.
-    :param questionnaire: the questionnaire on which register specified steps.
-    :param steps: a dictionary containing the new steps.
-    :param language: the language of the specified steps.
-    """
-    for step in steps:
-        step['questionnaire_id'] = questionnaire.id
-        questionnaire.steps.add(db_create_step(store, step, language))
+def db_create_questionnaire(session, state, tid, questionnaire_dict, language):
+    fill_localized_keys(questionnaire_dict, models.Questionnaire.localized_keys, language)
 
+    questionnaire_dict['tid'] = tid
+    q = models.db_forge_obj(session, models.Questionnaire, questionnaire_dict)
 
-def db_create_questionnaire(store, request, language):
-    request = fill_questionnaire_request(request, language)
+    for step in questionnaire_dict.get('steps', []):
+        db_create_step(session, tid, step, language)
 
-    questionnaire = models.Questionnaire(request)
-
-    store.add(questionnaire)
-
-    return questionnaire
+    return q
 
 
 @transact
-def create_questionnaire(store, request, language):
+def create_questionnaire(session, state, tid, request, language):
     """
     Creates a new questionnaire from the request of a client.
-
-    We associate to the questionnaire the list of receivers and if the receiver is
-    not valid we raise a ReceiverIdNotFound exception.
 
     Args:
         (dict) the request containing the keys to set on the model.
@@ -120,18 +80,17 @@ def create_questionnaire(store, request, language):
     Returns:
         (dict) representing the configured questionnaire
     """
-    questionnaire = db_create_questionnaire(store, request, language)
+    questionnaire = db_create_questionnaire(session, state, tid, request, language)
 
-    return serialize_questionnaire(store, questionnaire, language)
+    return serialize_questionnaire(session, tid, questionnaire, language)
 
 
 @transact
-def update_questionnaire(store, questionnaire_id, request, language):
+def update_questionnaire(session, tid, questionnaire_id, request, language):
     """
     Updates the specified questionnaire. If the key receivers is specified we remove
     the current receivers of the Questionnaire and reset set it to the new specified
     ones.
-    If no such questionnaire exists raises :class:`globaleaks.errors.QuestionnaireIdNotFound`.
 
     Args:
         questionnaire_id:
@@ -142,122 +101,62 @@ def update_questionnaire(store, questionnaire_id, request, language):
     Returns:
             (dict) the serialized object updated
     """
-    questionnaire = store.find(models.Questionnaire, models.Questionnaire.id == questionnaire_id).one()
-    if not questionnaire:
-        raise errors.QuestionnaireIdNotFound
+    questionnaire = models.db_get(session, models.Questionnaire, models.Questionnaire.tid == tid, models.Questionnaire.id == questionnaire_id)
 
-    questionnaire = db_update_questionnaire(store, questionnaire, request, language)
+    questionnaire = db_update_questionnaire(session, questionnaire, request, language)
 
-    return serialize_questionnaire(store, questionnaire, language)
-
-
-@transact
-def delete_questionnaire(store, questionnaire_id):
-    """
-    Deletes the specified questionnaire. If no such questionnaire exists raises
-    :class:`globaleaks.errors.QuestionnaireIdNotFound`.
-
-    Args:
-        questionnaire_id: the questionnaire id of the questionnaire to remove.
-    """
-    questionnaire = store.find(models.Questionnaire, models.Questionnaire.id == questionnaire_id).one()
-    if not questionnaire:
-        log.err("Invalid questionnaire requested in removal")
-        raise errors.QuestionnaireIdNotFound
-
-    store.remove(questionnaire)
+    return serialize_questionnaire(session, tid, questionnaire, language)
 
 
 class QuestionnairesCollection(BaseHandler):
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
+    check_roles = 'admin'
+    cache_resource = True
+    invalidate_cache = True
+
     def get(self):
         """
         Return all the questionnaires.
-
-        Parameters: None
-        Response: adminQuestionnaireList
-        Errors: None
         """
-        response = yield GLApiCache.get('questionnaires', self.request.language,
-                                        get_questionnaire_list, self.request.language)
+        return get_questionnaire_list(self.request.tid, self.request.language)
 
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def post(self):
         """
         Create a new questionnaire.
-
-        Request: AdminQuestionnaireDesc
-        Response: AdminQuestionnaireDesc
-        Errors: InvalidInputFormat, ReceiverIdNotFound
         """
-        validator = requests.AdminQuestionnaireDesc if self.request.language is not None else requests.AdminQuestionnaireDescRaw
+        validator = requests.AdminQuestionnaireDesc
+        if self.request.language is None:
+            validator = requests.AdminQuestionnaireDescRaw
 
-        request = self.validate_message(self.request.body, validator)
+        request = self.validate_message(self.request.content.read(), validator)
 
-        response = yield create_questionnaire(request, self.request.language)
-
-        GLApiCache.invalidate()
-
-        self.set_status(201)
-        self.write(response)
+        return create_questionnaire(self.state, self.request.tid, request, self.request.language)
 
 
 class QuestionnaireInstance(BaseHandler):
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
-    def get(self, questionnaire_id):
-        """
-        Get the specified questionnaire.
+    check_roles = 'admin'
+    invalidate_cache = True
 
-        Parameters: questionnaire_id
-        Response: AdminQuestionnaireDesc
-        Errors: QuestionnaireIdNotFound, InvalidInputFormat
-        """
-        response = yield get_questionnaire(questionnaire_id, self.request.language)
-
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def put(self, questionnaire_id):
         """
         Update the specified questionnaire.
-
-        Parameters: questionnaire_id
-        Request: AdminQuestionnaireDesc
-        Response: AdminQuestionnaireDesc
-        Errors: InvalidInputFormat, QuestionnaireIdNotFound, ReceiverIdNotFound
-
-        Updates the specified questionnaire.
         """
-        request = self.validate_message(self.request.body,
+        request = self.validate_message(self.request.content.read(),
                                         requests.AdminQuestionnaireDesc)
 
-        response = yield update_questionnaire(questionnaire_id, request, self.request.language)
+        return update_questionnaire(self.request.tid, questionnaire_id, request, self.request.language)
 
-        GLApiCache.invalidate()
-
-        self.set_status(202)
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def delete(self, questionnaire_id):
         """
         Delete the specified questionnaire.
-
-        Request: AdminQuestionnaireDesc
-        Response: None
-        Errors: InvalidInputFormat, QuestionnaireIdNotFound
         """
-        yield delete_questionnaire(questionnaire_id)
-        GLApiCache.invalidate()
+        return models.delete(models.Questionnaire, models.Questionnaire.tid == self.request.tid, models.Questionnaire.id == questionnaire_id)
+
+    @inlineCallbacks
+    def get(self, questionnaire_id):
+        """
+        Export questionnaire JSON
+        """
+        q = yield get_questionnaire(self.request.tid, questionnaire_id, None)
+        q['export_date'] = datetime_to_ISO8601(datetime_now())
+        q['export_version'] = QUESTIONNAIRE_EXPORT_VERSION
+        returnValue(q)

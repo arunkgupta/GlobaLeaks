@@ -1,208 +1,50 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #
-# overview
-#   ********
-# Implementation of the code executed when an HTTP client reach /overview/* URI
-
-import os
-
-from twisted.internet.defer import inlineCallbacks
-
+# API implementing an abstract admin overview of the submissions
 from globaleaks import models
-from globaleaks.orm import transact_ro
 from globaleaks.handlers.base import BaseHandler
-from globaleaks.settings import GLSettings
-from globaleaks.utils.structures import Rosetta
-from globaleaks.utils.utility import log, datetime_to_ISO8601
+from globaleaks.orm import transact
+from globaleaks.utils.utility import datetime_to_ISO8601
 
 
-@transact_ro
-def collect_tip_overview(store, language):
+@transact
+def collect_tip_overview(session, tid):
     tip_description_list = []
 
-    all_itips = store.find(models.InternalTip)
-    for itip in all_itips:
-        tip_description = {
+    for itip in session.query(models.InternalTip).filter(models.InternalTip.tid == tid):
+        tip_description_list.append({
             'id': itip.id,
             'creation_date': datetime_to_ISO8601(itip.creation_date),
-            'creation_lifetime': datetime_to_ISO8601(itip.creation_date),
             'expiration_date': datetime_to_ISO8601(itip.expiration_date),
-            'context_id': itip.context_id,
-            'receivertips': [],
-            'internalfiles': [],
-            'comments': [],
-            'wb_access_counter': 0,
-            'wb_last_access': u'Never'
-        }
-
-        mo = Rosetta(itip.context.localized_keys)
-        mo.acquire_storm_object(itip.context)
-        tip_description['context_name'] = mo.dump_localized_key('name', language)
-
-        for rtip in itip.receivertips:
-            tip_description['receivertips'].append({
-                'access_counter': rtip.access_counter,
-                'receiver_id': rtip.receiver.id,
-                'receiver_username': rtip.receiver.user.username,
-                'receiver_name': rtip.receiver.user.name,
-                # last_access censored willingly
-            })
-
-        for ifile in itip.internalfiles:
-            tip_description['internalfiles'].append({
-                'name': ifile.name,
-                'size': ifile.size,
-                'content_type': ifile.content_type
-            })
-
-        for comment in itip.comments:
-            tip_description['comments'].append({
-                'type': comment.type,
-                'lifetime': datetime_to_ISO8601(comment.creation_date),
-            })
-
-        # whistleblower tip has not a reference from itip, then:
-        wbtip = store.find(models.WhistleblowerTip,
-                           models.WhistleblowerTip.internaltip_id == itip.id).one()
-
-        if wbtip is not None:
-            tip_description.update({
-                'wb_access_counter': wbtip.access_counter,
-                'wb_last_access': datetime_to_ISO8601(wbtip.last_access)
-            })
-
-        tip_description_list.append(tip_description)
+            'context_id': itip.context_id
+        })
 
     return tip_description_list
 
 
-@transact_ro
-def collect_users_overview(store):
-    users_description_list = []
-
-    all_receivers = store.find(models.Receiver)
-    for receiver in all_receivers:
-        # all public of private infos are stripped, because know between the Admin resources
-        user_description = {
-            'id': receiver.id,
-            'name': receiver.user.name,
-            'receiverfiles': [],
-            'receivertips': [],
-            'pgp_key_status': receiver.user.pgp_key_status,
-        }
-
-        rcvr_files = store.find(models.ReceiverFile, models.ReceiverFile.receiver_id == receiver.id)
-        for rfile in rcvr_files:
-
-            if not rfile.internalfile:
-                log.err("(user_overview) ReceiverFile without InternaFile available: skipped")
-                continue
-
-            user_description['receiverfiles'].append({
-                'id': rfile.id,
-                'file_name': rfile.internalfile.name,
-                'downloads': rfile.downloads,
-                'last_access': datetime_to_ISO8601(rfile.last_access),
-            })
-
-        rcvr_tips = store.find(models.ReceiverTip, models.ReceiverTip.receiver_id == receiver.id)
-        for rtip in rcvr_tips:
-            user_description['receivertips'].append({
-                'internaltip_id': rtip.id,
-                'last_access': datetime_to_ISO8601(rtip.last_access),
-                'access_counter': rtip.access_counter
-            })
-
-        users_description_list.append(user_description)
-
-    return users_description_list
-
-
-@transact_ro
-def collect_files_overview(store):
+@transact
+def collect_files_overview(session, tid):
     file_description_list = []
 
-    submission_dir = os.path.join(GLSettings.working_path, GLSettings.submission_path)
-    disk_files = os.listdir(submission_dir)
-    stored_ifiles = store.find(models.InternalFile)
-    stored_rfiles = store.find(models.ReceiverFile)
-
-    # ifile evaluation
-    for ifile in stored_ifiles:
-        file_desc = {
+    for ifile in session.query(models.InternalFile).filter(models.InternalFile.internaltip_id == models.InternalTip.id,
+                                                           models.InternalTip.id == tid):
+        file_description_list.append({
             'id': ifile.id,
-            'name': ifile.name,
-            'content_type': ifile.content_type,
-            'size': ifile.size,
             'itip': ifile.internaltip_id,
-            'creation_date': datetime_to_ISO8601(ifile.creation_date),
-            'rfiles': 0,
-            'stored': False,
-            'path': '',
-        }
+            'path': ifile.file_path,
+            'size': ifile.size
+        })
 
-        file_desc['rfiles'] = store.find(models.ReceiverFile,
-                                         models.ReceiverFile.internalfile_id == ifile.id).count()
-
-        if ifile.file_path != '' and os.path.isfile(ifile.file_path):
-            file_desc['stored'] = True
-            file_desc['path'] = ifile.file_path
-
-            # disk_files contains all the files present in the submission_dir
-            # we remove the InternalFiles one by one, and the goal is to keep
-            # in disk_files all the not referenced files.
-            filename = os.path.basename(ifile.file_path)
-
-            if filename in disk_files:
-                disk_files.remove(filename)
-
-        file_description_list.append(file_desc)
-
-    # remaining files are checked for rfile presence
-    for rfile in stored_rfiles:
-        file_desc = {
-            'id': rfile.internalfile.id,
-            'name': rfile.internalfile.name,
-            'content_type': rfile.internalfile.content_type,
-            'size': rfile.size,
-            'itip': rfile.internaltip_id,
-            'creation_date': datetime_to_ISO8601(rfile.internalfile.creation_date),
-            'rfiles': 1,
-            'stored': False,
-            'path': '',
-        }
-
-        if os.path.isfile(rfile.file_path):
-            file_desc['stored'] = True
-            file_desc['path'] = rfile.file_path
-
-            # disk_files contains all the files present in the submission_dir
-            # we remove the InternalFiles one by one, and the goal is to keep
-            # in disk_files all the not referenced files.
-            filename = os.path.basename(rfile.file_path)
-
-            if filename in disk_files:
-                disk_files.remove(filename)
-
-        file_description_list.append(file_desc)
-
-
-    # remaining files are the file not tracked by any internalfile/receiverfile
-    for dfile in disk_files:
-        absfilepath = os.path.join(submission_dir, dfile)
-
-        file_desc = {
-            'id': '',
-            'name': '',
-            'content_type': '',
-            'size': os.stat(absfilepath).st_size,
-            'itip': '',
-            'rfiles_associated': 0,
-            'stored': True,
-            'path': absfilepath,
-        }
-
-        file_description_list.append(file_desc)
+    for rfile, itip in session.query(models.ReceiverFile, models.InternalFile) \
+                              .filter(models.ReceiverFile.internalfile_id == models.InternalFile.id,
+                                      models.InternalFile.internaltip_id == models.InternalTip.id,
+                                      models.InternalTip.id == tid):
+        file_description_list.append({
+            'id': rfile.internalfile_id,
+            'itip': itip.id,
+            'path': rfile.file_path,
+            'size': rfile.size
+        })
 
     return file_description_list
 
@@ -212,39 +54,10 @@ class Tips(BaseHandler):
     /admin/overview/tips
     Dump the list of the active tips with various information
     """
+    check_roles = 'admin'
 
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def get(self):
-        """
-        Parameters: None
-        Response: TipsOverviewDescList
-        Errors: None
-        """
-        tips_complete_list = yield collect_tip_overview(self.request.language)
-
-        self.write(tips_complete_list)
-
-
-class Users(BaseHandler):
-    """
-    Dump the list of the users
-    /admin/overview/users
-    """
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
-    def get(self):
-        """
-        Parameters: None
-        Response: UsersOverviewDescList
-        Errors: None
-        """
-        users_complete_list = yield collect_users_overview()
-
-        self.write(users_complete_list)
+        return collect_tip_overview(self.request.tid)
 
 
 class Files(BaseHandler):
@@ -254,17 +67,7 @@ class Files(BaseHandler):
     Return the list of the files in InternalFile, ReceiverFile
     and the files in
     """
+    check_roles = 'admin'
 
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def get(self):
-        """
-        Parameters: None
-        Response: FilesOverviewDescList
-        Errors: None
-        """
-
-        file_complete_list = yield collect_files_overview()
-
-        self.write(file_complete_list)
+        return collect_files_overview(self.request.tid)

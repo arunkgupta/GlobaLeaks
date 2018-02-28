@@ -1,60 +1,47 @@
 <p align="center">
-  <img src="/client/app/logo.png" width="300" height="300">
+  <img src="/client/app/data/logo.png" width="300">
 </p>
 
-GlobaLeaks is a project aimed at creating an opensource and free software whistleblowing framework.
+[GlobaLeaks](https://www.globaleaks.org/) is open-source / free software intended to enable secure and anonymous whistleblowing initiatives developed by the [Hermes Center for Transparency and Digital Human Rights](https://www.hermescenter.org/).
 
-To learn how to setup your own GlobaLeaks platform, look at the [wiki documentation] (https://github.com/globaleaks/GlobaLeaks/wiki).
+For the user manual refer to the [GlobaLeaks's User Manual](https://docs.globaleaks.org/).
 
-## GlobaLeaks is hiring!
-[EN] GlobaLeaks Project is hiring talented developers! [Apply here](http://logioshermes.org/open-call-for-globaleaks-developers/)
+For the developer documentation refer to the [GlobaLeaks's Developer Documentation](https://github.com/globaleaks/GlobaLeaks/wiki).
 
-[IT] Il Progetto GlobaLeaks sta cercando sviluppatori! [Fai application qui!](http://logioshermes.org/cerchiamo-sviluppatori-per-software-libero-globaleaks/)
+## Community and professional support
+If you need technical support, have general questions, or have new ideas for GlobaLeaks, please post your message on the [community support forum](https://forum.globaleaks.org/).
 
-## Community and support
-If you need help with the software write your inquiry to the GlobaLeaks [Mailing List] (https://lists.ghserv.net/mailman/listinfo/globaleaks-talk): globaleaks-talk@lists.globaleaks.org
+If your non-profit needs support for investigative journalism, activism or a human rights defense project, contact the [Hermes Center](mailto:projects@hermescenter.org).
 
-If instead you need to contact us privately to get feedback on a specific whistleblowing project and involve us as Hermes Center, please [contact us directly](http://logioshermes.org/home/about-mission/contacts/), we'd love to help you out!
+If you are a journalist or have a media inquiry, [send us an email](mailto:media@globaleaks.org).
+
+If you want to contribute to software development or report a bug, please open an issue on [GitHub](https://github.com/globaleaks/GlobaLeaks/issues/).
+
+If you need professional support, please use this form: [https://www.globaleaks.org/contact/](https://www.globaleaks.org/contact/ )
 
 Other resources:
-* [Development mailing list](https://lists.ghserv.net/mailman/listinfo/globaleaks-dev).
-* Join [#globaleaks](https://irc.lc/OFTC/globaleaks/GL_github_user), our IRC chat channel the irc.oftc.net server.
+* Join [#globaleaks](https://webchat.oftc.net/?nick=gl-guest.&channels=globaleaks), our IRC chat channel on the `irc.oftc.net` server.
 * Follow us on [Twitter](https://twitter.com/globaleaks)
 * Follow us on [Facebook](https://www.facebook.com/globaleaks)
 
-## Build Status
-| Branch | Build status | Code coverage
-| ------------- |:-------------:|:-------------:|:-------------:|
-| [master](https://github.com/globaleaks/GlobaLeaks/tree/master) | [![Build Status](https://travis-ci.org/globaleaks/GlobaLeaks.svg?branch=master)](http://travis-ci.org/globaleaks/GlobaLeaks) | [![Coverage Status](https://coveralls.io/repos/globaleaks/GlobaLeaks/badge.svg?branch=master)](https://coveralls.io/r/globaleaks/GlobaLeaks?branch=master)
-| [devel](https://github.com/globaleaks/GlobaLeaks/tree/devel) | [![Build Status](https://travis-ci.org/globaleaks/GlobaLeaks.svg?branch=devel)](http://travis-ci.org/globaleaks/GlobaLeaks) | [![Coverage Status](https://coveralls.io/repos/globaleaks/GlobaLeaks/badge.svg?branch=devel)](https://coveralls.io/r/globaleaks/GlobaLeaks?branch=devel)
+#### Build Status
+| Branch | Build status | Browser compatibility |
+| :---: | :---: | :---: |
+| [master](https://github.com/globaleaks/GlobaLeaks/tree/master) | [![Build Status](https://travis-ci.org/globaleaks/GlobaLeaks.svg?branch=master)](https://travis-ci.org/globaleaks/GlobaLeaks) | [![Browser Status](https://badges.herokuapp.com/sauce/globaleaks?tag=master&labels=none)](https://saucelabs.com/u/globaleaks)
+| [devel](https://github.com/globaleaks/GlobaLeaks/tree/devel) | [![Build Status](https://travis-ci.org/globaleaks/GlobaLeaks.svg?branch=devel)](https://travis-ci.org/globaleaks/GlobaLeaks) | [![Browser Status](https://badges.herokuapp.com/sauce/globaleaks?tag=devel&labels=none)](https://saucelabs.com/u/globaleaks)
 
-Browser compatibility:
-
-[![Saucelabs Test Status](https://saucelabs.com/browser-matrix/globaleaks.svg)](https://saucelabs.com/u/globaleaks)
-
-Code quality:
-
-[![Code Climate](https://codeclimate.com/github/globaleaks/GlobaLeaks/badges/gpa.svg)](https://codeclimate.com/github/globaleaks/GlobaLeaks)
+### Code quality:
+| Branch | Codacy | Coveralls |
+| :---: | :---: | :---: |
+| [master](https://github.com/globaleaks/GlobaLeaks/tree/master) | [![Codacy Badge](https://api.codacy.com/project/badge/Grade/https://api.codacy.com/project/badge/Grade/https://api.codacy.com/project/badge/Grade/8bd2370745cf4ca0b2432e8a5fb7c053?branch=master?branch=master?branch=master)](https://www.codacy.com/app/GlobaLeaks/GlobaLeaks) | [![Coverage Status](https://coveralls.io/repos/globaleaks/GlobaLeaks/badge.svg?branch=master)](https://coveralls.io/r/globaleaks/GlobaLeaks?branch=master)
+| [devel](https://github.com/globaleaks/GlobaLeaks/tree/master) | [![Codacy Badge](https://api.codacy.com/project/badge/Grade/829f1847c5794c758e17d6e939cb76f0?branch=master)](https://www.codacy.com/app/GlobaLeaks/GlobaLeaks) | [![Coverage Status](https://coveralls.io/repos/globaleaks/GlobaLeaks/badge.svg?branch=devel)](https://coveralls.io/r/globaleaks/GlobaLeaks?branch=devel)
 
 ## Donate
-To support the GlobaLeaks project you can help us with donations that will goes entirely for the software development!
+To support the GlobaLeaks project you can help us with donations that will goes entirely for the software development.
 
-[![Bitcoin](https://bitpay.com/img/donate-button.svg)](https://www.globaleaks.org/bitcoin.html) [![PayPal](https://www.paypalobjects.com/en_US/i/btn/x-click-butcc-donate.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id= 22CAHH6GRRCTC)  [![Subscription](https://www.paypalobjects.com/en_US/i/btn/btn_subscribeCC_LG.gif)](https://globaleaks.org/paypal.html)
-
-[Help us](http://logioshermes.org/home/about-mission/support-us/) by sending us a small donation!
+[Help us by sending us a small donation!](https://www.globaleaks.org/donate)
 
 ## License
-Copyright (C) 2011-2016 Hermes No Profit Association - GlobaLeaks Project
+This software is released under the AGPLv3 license. See LICENSE file for more information.
 
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU Affero General Public License as published by the Free
-Software Foundation, either version 3 of the License, or (at your option) any
-later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
-details.
-
-You should have received a copy of the GNU Affero General Public License along
-with this program. If not, see http://www.gnu.org/licenses/.
+Copyright (c) 2011-2017 - [Hermes Center for Transparency and Digital Human Rights](https://www.hermescenter.org)

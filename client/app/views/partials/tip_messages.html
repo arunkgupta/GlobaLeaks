@@ -3,8 +3,8 @@
     <div>
       <span>{{node.widget_messages_title}}</span>
       <span class="pull-right">
-        <i data-ng-if="!collapsed" class="glyphicon glyphicon-collapse-down" uib-popover="{{'Collapse' | translate}}" popover-placement="left" popover-trigger="mouseenter"></i>
-        <i data-ng-if="collapsed" class="glyphicon glyphicon-fullscreen" uib-popover="{{'Expand' | translate}}" popover-placement="left" popover-trigger="mouseenter"></i>
+        <i data-ng-if="!collapsed" class="glyphicon glyphicon-collapse-down" uib-popover="{{'Collapse' | translate}}" popover-placement="left"></i>
+        <i data-ng-if="collapsed" class="glyphicon glyphicon-fullscreen" uib-popover="{{'Expand' | translate}}" popover-placement="left"></i>
       </span>
     </div>
   </div>
@@ -18,42 +18,30 @@
           </span>
         </div>
         <br />
-        <textarea id="TipCommunicationMessagesInput" data-ng-model="tip.newMessageContent" maxlength="{{::node.maximum_textsize}}" class="form-control"></textarea>
-        <div data-translate-values="{available_characters_count: node.maximum_textsize - tip.newMessageContent.length}"
-             data-translate>FIELD_INPUT_AVAILABLE_CHARS</div>
+        <textarea id="TipCommunicationMessagesInput" data-ng-model="tip.newMessageContent" maxlength="4096" class="form-control" autocomplete="off"></textarea>
+        <span class="float-right">{{tip.newMessagesContent.length ? tip.newMessagesContent.length : '0'}}/4096</span>
       </div>
       <div class="col-md-12">
         <span class="pull-left">
-          <a id="message-action-send" class="btn btn-success" data-ng-click="newMessage()" data-ng-disabled="!tip.newMessageContent || (session.role === 'whistleblower' && !tip.msg_receiver_selected)">
+          <button id="message-action-send" class="btn btn-sm btn-primary" data-ng-click="newMessage()" data-ng-disabled="!tip.newMessageContent || (session.role === 'whistleblower' && !tip.msg_receiver_selected)">
             <i class="glyphicon glyphicon-envelope"></i>
             <span data-translate>Send</span>
-          </a>
+          </button>
         </span>
-        <span data-ng-if="session.role === 'receiver' && preferences.can_grant_permissions" data-ng-switch="tip.enable_two_way_messages" class="pull-right">
-          <span data-ng-switch-when="false">
-            <a id="button-enable-whistleblower-messages" class="btn btn-primary" data-ng-click="allowWhistleblowerToMessage()">
-              <i class="glyphicon glyphicon-ok-circle"></i>
-              <span>Allow the whistleblower to send messages</span>
-            </a>
-          </span>
-          <span data-ng-switch-when="true">
-            <a id="button-enable-whistleblower-messages" class="btn btn-danger" data-ng-click="denyWhistleblowerToMessage()">
-              <i class="glyphicon glyphicon-ban-circle"></i>
-              <span>Deny the whistleblower to send messages</span>
-            </a>
-          </span>
+        <span data-ng-if="session.role === 'receiver' && preferences.can_grant_permissions" class="pull-right form-group">
+          <label class="inline-checkbox">
+            <input data-ng-model="tip.enable_two_way_messages" data-ng-change="tip.setVar('enable_two_way_messages', tip.enable_two_way_messages)" type="checkbox" />
+            <span data-translate>Allow the whistleblower to send messages</span>
+          </label>
         </span>
       </div>
-    </div>
-    <div data-ng-if="session.role === 'whistleblower' && !tip.enable_two_way_messages">
-      <span data-translate>You are not allowed to send messages.</span>
     </div>
     <div id="SubmissionMessages" data-ng-if="tip.messages.length > 0" data-ng-repeat="message in tip.messages | orderBy:'creation_date':true">
       <div id="message-{{$index}}" data-ng-switch="" on="message.type">
          <div data-ng-switch-when="whistleblower" class="alert alert-info">
           <div class="row">
             <div class="col-md-6">
-              <div data-translate class="WbNameInMessages">Whistleblower</div>
+              <div class="WbNameInMessages" data-translate>Whistleblower</div>
             </div>
             <div class="pull-right" style="margin-right:20px">
               <div>{{::message.creation_date | date:'dd-MM-yyyy HH:mm'}}</div>

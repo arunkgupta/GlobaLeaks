@@ -1,30 +1,43 @@
-var pages = require('./pages.js');
-
 describe('admin configure, add, and delete contexts', function() {
-  var adminLog = new pages.adminLoginPage();
-
-  beforeAll(function() {
-    adminLog.login('admin', 'ACollectionOfDiplomaticHistorySince_1966_ToThe_Pr esentDay#');
-    browser.setLocation('admin/contexts');
-  });
-
   it('should configure an existing context', function() {
-    element(by.id('context-0')).element(by.css('.actionButtonEdit')).click();
+    browser.setLocation('admin/contexts');
+
+    var ctx = element(by.id('context-0'));
+    ctx.element(by.cssContainingText("button", "Edit")).click();
+
     // Add users and flip switches
-    element(by.cssContainingText("span", "Recipient 2")).click();
-    element(by.cssContainingText("span", "Recipient 3")).click();
-    element(by.id('context-0')).element(by.css('.actionButtonAdvanced')).click();
-    element(by.id('context-0')).element(by.model('context.allow_recipients_selection')).click();
-    element(by.id('context-0')).element(by.model('context.enable_messages')).click();
+    ctx.element(by.className('add-receiver-btn')).click();
+
+    var input = element(by.id('ReceiverContextAdder')).all(by.css('input')).last();
+    input.sendKeys('Recipient2' + protractor.Key.ENTER);
+
+    ctx.element(by.className('add-receiver-btn')).click();
+    input = element(by.id('ReceiverContextAdder')).all(by.css('input')).last();
+    input.sendKeys('Recipient3' + protractor.Key.ENTER);
+
+    ctx.element(by.cssContainingText("button", "Advanced settings")).click();
+
+    ctx.element(by.model('context.allow_recipients_selection')).click();
+
+    browser.gl.utils.waitUntilPresent(by.model('context.select_all_receivers'));
+
+    ctx.element(by.model('context.select_all_receivers')).click();
+
+    ctx.element(by.model('context.enable_messages')).click();
+    ctx.element(by.model('context.enable_rc_to_wb_files')).click();
+
     // Save the results
-    element(by.id('context-0')).element(by.css('.actionButtonSave')).click();
+    ctx.element(by.cssContainingText("button", "Save")).click();
+
     // TODO check if the result was saved
   });
 
   it('should add new contexts', function() {
-    var add_context = function(context) {
-      element(by.model('new_context.name')).sendKeys(context);
-      return element(by.css('[data-ng-click="add_context()"]')).click();
+    var add_context = function(context_name) {
+      element(by.css('.show-add-context-btn')).click();
+      element(by.model('new_context.name')).sendKeys(context_name);
+      element(by.id('add-btn')).click();
+      browser.gl.utils.waitUntilPresent(by.xpath(".//*[text()='" + context_name + "']"));
     };
 
     add_context('Context 2');
@@ -33,7 +46,7 @@ describe('admin configure, add, and delete contexts', function() {
   });
 
   it('should del existing contexts', function() {
-    element.all((by.css('.actionButtonDelete'))).last().click();
+    element.all((by.cssContainingText("button", "Delete"))).last().click();
     // TODO delete context 2 and 3
     element(by.id('modal-action-ok')).click();
     // TODO check that the context is actually gone

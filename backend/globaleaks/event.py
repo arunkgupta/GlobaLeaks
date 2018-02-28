@@ -1,6 +1,7 @@
-from globaleaks.settings import GLSettings
-from globaleaks.utils.tempdict import TempDict
-from globaleaks.utils.utility import log, datetime_now, datetime_to_ISO8601
+# -*- coding: utf-8
+
+from globaleaks.state import State
+from globaleaks.utils.utility import datetime_now, datetime_to_ISO8601
 
 
 # follow the checker, they are executed from handlers/base.py
@@ -94,21 +95,12 @@ events_monitored = [
         'name': 'files',
         'handler_check': file_upload_check,
         'method': 'POST',
-        'status_check': created_status_check
+        'status_check': ok_status_check
     }
 ]
 
 
-def track_handler(handler):
-    for event in events_monitored:
-        if event['handler_check'](handler.request.uri) and \
-                        event['method'] == handler.request.method and \
-                event['status_check'](handler._status_code):
-            EventTrack(event, handler.request.request_time())
-            break
-
-
-class EventTrack(object):
+class Event(object):
     """
     Every event that is kept in memory, is a temporary object.
     Once a while, they disappear. The statistics just take
@@ -117,60 +109,27 @@ class EventTrack(object):
     - Anomaly check is based on those elements.
     - Real-time analysis is based on these, too.
     """
-
-    def serialize_event(self):
-        return {
-            # if the [:-8] I'll strip "." + $millisecond "Z"
-            'creation_date': datetime_to_ISO8601(self.creation_date)[:-8],
-            'event': self.event_type,
-            'id': self.event_id,
-            'duration': round(self.request_time, 1)
-        }
-
-    def __init__(self, event_obj, request_time, debug=False):
-        self.debug = debug
-        self.creation_date = datetime_now()
-        self.event_id = EventTrackQueue.event_number()
+    def __init__(self, event_obj, request_time):
         self.event_type = event_obj['name']
-        self.request_time = request_time
+        self.creation_date = datetime_now()
+        self.request_time = round(request_time.total_seconds(), 1)
 
-        if self.debug:
-            log.debug("Creation of Event %s" % self.serialize_event())
-
-        EventTrackQueue.set(self.event_id, self)
-
-    def __repr__(self):
-        return "%s" % self.serialize_event()
-
-    def synthesis(self):
+    def serialize(self):
         return {
-            'id': self.event_id,
-            'creation_date': datetime_to_ISO8601(self.creation_date)[:-8],
             'event': self.event_type,
-            'duration': round(self.request_time, 1),
+            'creation_date': datetime_to_ISO8601(self.creation_date)[:-8],
+            'duration': self.request_time
         }
 
 
-class EventTrackQueueClass(TempDict):
-    """
-    This class has only a class variable, used to stock the queue of the
-    event happened on the latest minutes.
-    """
-    event_absolute_counter = 0
+def track_handler(handler):
+    tid = handler.request.tid
 
-    def expireCallback(self, event):
-        """
-        On expiration of an event perform the synthesis and
-        append them to the RecentEventQueue.
-        """
-        GLSettings.RecentEventQ.append(event.synthesis())
-
-    def event_number(self):
-        self.event_absolute_counter += 1
-        return self.event_absolute_counter
-
-    def take_current_snapshot(self):
-        return [event_obj.serialize_event() for _, event_obj in EventTrackQueue.iteritems()]
-
-
-EventTrackQueue = EventTrackQueueClass(timeout=60)
+    for event in events_monitored:
+        if event['handler_check'](handler.request.uri) and \
+           event['method'] == handler.request.method and \
+           event['status_check'](handler.request.code):
+            e = Event(event, handler.request.execution_time)
+            State.tenant_state[tid].RecentEventQ.append(e)
+            State.tenant_state[tid].EventQ.append(e)
+            break

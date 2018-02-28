@@ -1,7 +1,9 @@
-GLClient.controller('AdminQuestionnaireCtrl', ['$scope', function($scope){
+GLClient.controller('AdminQuestionnaireCtrl',
+  ['$scope', '$http', 'Utils', 'AdminQuestionnaireResource',
+  function($scope, $http, Utils, AdminQuestionnaireResource){
   $scope.tabs = [
     {
-      title:"Questionnaire configuration",
+      title:"Questionnaires",
       template:"views/admin/questionnaires/main.html"
     },
     {
@@ -9,28 +11,50 @@ GLClient.controller('AdminQuestionnaireCtrl', ['$scope', function($scope){
       template:"views/admin/questionnaires/questions.html"
     }
   ];
-}]).
-controller('AdminQuestionnairesCtrl',
-  ['$scope', 'AdminQuestionnaireResource',
-  function($scope, AdminQuestionnaireResource) {
+
+  $scope.admin.get_field_attrs = function(type) {
+    if (type in $scope.admin.field_attrs) {
+      return $scope.admin.field_attrs[type];
+    } else {
+      return {};
+    }
+  };
+
+  $scope.showAddQuestionnaire = false;
+  $scope.toggleAddQuestionnaire = function() {
+    $scope.showAddQuestionnaire = !$scope.showAddQuestionnaire;
+  };
+
+  $scope.showAddQuestion = false;
+  $scope.toggleAddQuestion = function() {
+    $scope.showAddQuestion = !$scope.showAddQuestion;
+  };
+
+  $scope.importQuestionnaire = function(file) {
+    Utils.readFileAsText(file).then(function(txt) {
+      return $http({
+        method: 'POST',
+        url: 'admin/questionnaires?multilang=1',
+        data: txt,
+      })
+    }).then(function(resp) {
+      var new_q = new AdminQuestionnaireResource(resp.data);
+      $scope.admin.questionnaires.push(new_q);
+    }, Utils.displayErrorMsg);
+  };
 
   $scope.save_questionnaire = function(questionnaire, cb) {
     var updated_questionnaire = new AdminQuestionnaireResource(questionnaire);
 
-    return $scope.update(updated_questionnaire, cb);
+    return Utils.update(updated_questionnaire, cb);
   };
 
   $scope.delete_questionnaire = function(questionnaire) {
-    AdminQuestionnaireResource['delete']({
-      id: questionnaire.id
-    }, function(){
-      var idx = $scope.admin.questionnaires.indexOf(questionnaire);
-      $scope.admin.questionnaires.splice(idx, 1);
-    });
+    return Utils.deleteResource(AdminQuestionnaireResource, $scope.admin.questionnaires, questionnaire);
   };
 }]).
-controller('AdminQuestionnaireEditorCtrl', ['$scope', 'AdminStepResource',
-  function($scope, AdminStepResource) {
+controller('AdminQuestionnaireEditorCtrl', ['$scope', '$http', 'Utils', 'FileSaver', 'AdminStepResource',
+  function($scope, $http, Utils, FileSaver, AdminStepResource) {
 
   $scope.editing = false;
 
@@ -38,17 +62,22 @@ controller('AdminQuestionnaireEditorCtrl', ['$scope', 'AdminStepResource',
     $scope.editing = !$scope.editing;
   };
 
-  $scope.delStep = function(step) {
-    AdminStepResource['delete']({
-      id: step.id
-    }, function() {
-      $scope.questionnaire.steps.splice($scope.questionnaire.steps.indexOf(step), 1);
-    });
+  $scope.showAddStep = false;
+  $scope.toggleAddStep = function() {
+    $scope.showAddStep = !$scope.showAddStep;
   };
 
-  $scope.delAllSteps = function() {
-    angular.forEach($scope.questionnaire.steps, function(step) {
-      $scope.delStep(step);
+  $scope.delStep = function(step) {
+    return Utils.deleteResource(AdminStepResource, $scope.questionnaire.steps, step);
+  };
+
+  $scope.exportQuestionnaire = function(obj) {
+    $http({
+      method: 'GET',
+      url: 'admin/questionnaires/' + obj.id,
+      responseType: 'blob',
+    }).then(function (response) {
+      FileSaver.saveAs(response.data, obj.name + '.json');
     });
   };
 }]).
@@ -56,7 +85,7 @@ controller('AdminQuestionnaireAddCtrl', ['$scope', function($scope) {
   $scope.new_questionnaire = {};
 
   $scope.add_questionnaire = function() {
-    var questionnaire = new $scope.admin.new_questionnaire();
+    var questionnaire = new $scope.admin_utils.new_questionnaire();
 
     questionnaire.name = $scope.new_questionnaire.name;
 

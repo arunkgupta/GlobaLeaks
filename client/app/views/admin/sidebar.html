@@ -1,4 +1,13 @@
 <ul class="nav nav-pills nav-stacked">
+  <li data-ng-class="active.home">
+    <a href="#/admin/home">
+      <i class="glyphicon glyphicon-chevron-right"></i>
+      <span data-translate>Home</span>
+
+      <i data-ng-show="update_service.update_needed" class="glyphicon glyphicon-exclamation-sign text-danger"></i>
+    </a>
+  </li>
+
   <li data-ng-class="active.content">
     <a href="#/admin/content">
       <i class="glyphicon glyphicon-chevron-right"></i>
@@ -9,28 +18,28 @@
   <li data-ng-class="active.users">
     <a href="#/admin/users">
       <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>User management</span>
+      <span data-translate>Users</span>
     </a>
   </li>
 
   <li data-ng-class="active.receivers">
     <a href="#/admin/receivers">
       <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>Recipient configuration</span>
+      <span data-translate>Recipients</span>
     </a>
   </li>
 
   <li data-ng-class="active.contexts">
     <a href="#/admin/contexts">
       <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>Context configuration</span>
+      <span data-translate>Contexts</span>
     </a>
   </li>
 
-  <li data-ng-class="active.questionaires">
+  <li data-ng-class="active.questionnaires">
     <a href="#/admin/questionnaires">
       <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>Questionnaire configuration</span>
+      <span data-translate>Questionnaires</span>
     </a>
   </li>
 
@@ -41,11 +50,18 @@
    </a>
   </li>
 
-  <li data-ng-class="active.url_shortener">
-    <a href="#/admin/url_shortener">
+  <li data-ng-class="active.network">
+    <a href="#/admin/network">
       <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>URL shortener</span>
-   </a>
+      <span data-translate>Network settings</span>
+    </a>
+  </li>
+
+  <li data-ng-class="active.tenants" data-ng-if="admin.node.root_tenant && admin.node.enable_experimental_features">
+    <a href="#/admin/tenants">
+      <i class="glyphicon glyphicon-chevron-right"></i>
+      <span data-translate>Sites management</span>
+    </a>
   </li>
 
   <li data-ng-class="active.advanced_settings">
@@ -55,49 +71,10 @@
     </a>
   </li>
 
-  <br />
-
-  <li data-ng-class="active.activities">
-    <a href="#/admin/activities">
+  <li data-ng-class="active.overview">
+    <a href="#/admin/overview">
       <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>Recent activities</span>
-    </a>
-  </li>
-
-  <li data-ng-class="active.stats">
-    <a href="#/admin/stats">
-      <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>System stats</span>
-    </a>
-  </li>
-
-  <li data-ng-class="active.anomalies">
-    <a href="#/admin/anomalies">
-      <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>Anomalies</span>
-    </a>
-  </li>
-
-  <br />
-
-  <li data-ng-class="active.users_overview">
-    <a href="#/admin/overview/users">
-      <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>User overview</span>
-    </a>
-  </li>
-
-  <li data-ng-class="active.tips_overview">
-    <a href="#/admin/overview/tips">
-      <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>Submission overview</span>
-    </a>
-  </li>
-
-  <li data-ng-class="active.files_overview">
-    <a href="#/admin/overview/files">
-      <i class="glyphicon glyphicon-chevron-right"></i>
-      <span data-translate>File overview</span>
+      <span data-translate>System overview</span>
     </a>
   </li>
 </ul>

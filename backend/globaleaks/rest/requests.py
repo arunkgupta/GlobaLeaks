@@ -1,4 +1,4 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #   Requests
 #   ********
 #
@@ -7,25 +7,32 @@
 # These specifications may be used with rest.validateMessage() inside each of the API
 # handler in order to verify if the request is correct.
 
-from globaleaks import models
-from globaleaks.utils.structures import get_raw_request_format
+import copy
 
+from globaleaks import models
+from globaleaks.models.l10n import NotificationL10NFactory
+from globaleaks.utils.sets import merge_dicts
+
+
+key_regexp                        = r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$|^[a-z_]{0,100}$'
+key_regexp_or_empty               = r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$|^[a-z_]{0,100}$|^$'
 uuid_regexp                       = r'^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$'
 uuid_regexp_or_empty              = r'^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$|^$'
 user_roles_regexp                 = r'^(admin|custodian|receiver)$'
 user_states_regexp                = r'^(enabled|disabled)$'
-receiver_img_regexp               = r'^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}).png$'
 email_regexp                      = r'^(([\w+-\.]){0,100}[\w]{1,100}@([\w+-\.]){0,100}[\w]{1,100})$'
 email_regexp_or_empty             = r'^(([\w+-\.]){0,100}[\w]{1,100}@([\w+-\.]){0,100}[\w]{1,100})$|^$'
-hidden_service_regexp             = r'^http(s?)://[0-9a-z]{16}\.onion$'
-hidden_service_regexp_or_empty    = r'^http(s?)://[0-9a-z]{16}\.onion$$|^$'
+onionservice_regexp_or_empty      = r'^[0-9a-z]{16}\.onion$|^$'
+hostname_regexp                   = r'^[0-9a-z\-\.]+$'
+hostname_regexp_or_empty          = r'^[0-9a-z\-\.]+$|^$'
 https_url_regexp                  = r'^https://([0-9a-z\-]+)\.(.*)$'
 https_url_regexp_or_empty         = r'^https://([0-9a-z\-]+)\.(.*)$|^$'
 landing_page_regexp               = r'^(homepage|submissionpage)$'
-context_selector_type_regexp      = r'^(list|cards)$'
+context_selector_type_regexp      = r'^(list|cards|search)$'
 tip_operation_regexp              = r'^(postpone|set)$'
-shorturl_regexp                   = r'^(/s/[a-z0-9]{1,30})$'
+shorturl_regexp                   = r'^([a-z0-9_-]{1,30})$'
 longurl_regexp                    = r'^(/[a-z0-9#=_&?/-]{1,255})$'
+short_text_regexp                 = r'^.{1,255}$'
 
 token_regexp                      = r'([a-zA-Z0-9]{42})'
 token_type_regexp                 = r'^submission$'
@@ -57,7 +64,18 @@ identityaccessreply_regexp        = (r'^('
                                      'authorized|'
                                      'denied)$')
 
-class SkipSpecificValidation: pass
+class SkipSpecificValidation:
+    pass
+
+
+def get_multilang_request_format(request_format, localized_strings):
+    ret = copy.deepcopy(request_format)
+
+    for ls in localized_strings:
+        ret[ls] = dict
+
+    return ret
+
 
 DateType = r'(.*)'
 
@@ -65,6 +83,12 @@ DateType = r'(.*)'
 # via stackoverflow:
 # /^(application|audio|example|image|message|model|multipart|text|video)\/[a-zA-Z0-9]+([+.-][a-zA-z0-9]+)*$/
 ContentType = r'(.*)'
+
+AdminTenantDesc = {
+    'label': unicode,
+    'active': bool,
+    'subdomain': hostname_regexp_or_empty,
+}
 
 FileDesc = {
     'name': unicode,
@@ -77,6 +101,7 @@ FileDesc = {
 AuthDesc = {
     'username': unicode,
     'password': unicode,
+    'token': unicode
 }
 
 ReceiptAuthDesc = {
@@ -90,7 +115,6 @@ TokenReqDesc = {
 
 TokenAnswerDesc = {
     'human_captcha_answer': int,
-    'graph_captcha_answer': unicode,
     'proof_of_work_answer': int
 }
 
@@ -110,17 +134,13 @@ UserUserDesc = {
     'password': unicode,
     'old_password': unicode,
     'password_change_needed': bool,
-    'deletable': bool,
     'state': user_states_regexp,
     'mail_address': email_regexp,
     'pgp_key_remove': bool,
     'pgp_key_fingerprint': unicode,
     'pgp_key_expiration': unicode,
-    'pgp_key_info': unicode,
     'pgp_key_public': unicode,
-    'pgp_key_status': unicode,
-    'language': unicode,
-    'timezone': int
+    'language': unicode
 }
 
 AdminUserDesc = UserUserDesc # currently the same
@@ -137,12 +157,9 @@ ReceiverReceiverDesc = {
     'pgp_key_remove': bool,
     'pgp_key_fingerprint': unicode,
     'pgp_key_expiration': unicode,
-    'pgp_key_info': unicode,
     'pgp_key_public': unicode,
-    'pgp_key_status': unicode,
     'tip_notification': bool,
-    'language': unicode,
-    'timezone': int
+    'language': unicode
 }
 
 ReceiverOperationDesc = {
@@ -152,6 +169,11 @@ ReceiverOperationDesc = {
 
 CommentDesc = {
     'content': unicode
+}
+
+OpsDesc = {
+  'operation': unicode,
+  'args': dict,
 }
 
 TipOpsDesc = {
@@ -171,27 +193,23 @@ AdminNodeDesc = {
     'footer': unicode,
     'security_awareness_title': unicode,
     'security_awareness_text': unicode,
+    'rootdomain': hostname_regexp_or_empty,
     'whistleblowing_question': unicode,
     'whistleblowing_button': unicode,
     'whistleblowing_receipt_prompt': unicode,
-    'hidden_service': hidden_service_regexp_or_empty,
-    'public_site': https_url_regexp_or_empty,
+    'tb_download_link': https_url_regexp,
     'languages_enabled': [unicode],
     'languages_supported': list,
     'default_language': unicode,
-    'default_timezone': int,
-    'maximum_namesize': int,
-    'maximum_textsize': int,
+    'default_questionnaire': unicode,
     'maximum_filesize': int,
-    'tor2web_admin': bool,
-    'tor2web_custodian': bool,
-    'tor2web_whistleblower': bool,
-    'tor2web_receiver': bool,
-    'tor2web_unauth': bool,
+    'https_admin': bool,
+    'https_custodian': bool,
+    'https_whistleblower': bool,
+    'https_receiver': bool,
     'can_postpone_expiration': bool,
     'can_delete_submission': bool,
     'can_grant_permissions': bool,
-    'ahmia': bool,
     'allow_indexing': bool,
     'allow_unencrypted': bool,
     'disable_encryption_warnings': bool,
@@ -201,13 +219,14 @@ AdminNodeDesc = {
     'disable_security_awareness_questions': bool,
     'disable_key_code_hint': bool,
     'disable_donation_panel': bool,
+    'disable_submissions': bool,
     'simplified_login': bool,
     'enable_captcha': bool,
     'enable_proof_of_work': bool,
     'enable_experimental_features': bool,
+    'enable_signup': bool,
     'enable_custom_privacy_badge': bool,
-    'custom_privacy_badge_tor': unicode,
-    'custom_privacy_badge_none': unicode,
+    'custom_privacy_badge_text': unicode,
     'header_title_homepage': unicode,
     'header_title_submissionpage': unicode,
     'header_title_receiptpage': unicode,
@@ -215,94 +234,52 @@ AdminNodeDesc = {
     'landing_page': landing_page_regexp,
     'context_selector_type': context_selector_type_regexp,
     'contexts_clarification': unicode,
-    'submission_minimum_delay': int,
-    'submission_maximum_ttl': int,
     'show_contexts_in_alphabetical_order': bool,
     'show_small_context_cards': bool,
     'widget_comments_title': unicode,
     'widget_messages_title': unicode,
     'widget_files_title': unicode,
     'threshold_free_disk_megabytes_high': int,
-    'threshold_free_disk_megabytes_medium': int,
     'threshold_free_disk_megabytes_low': int,
     'threshold_free_disk_percentage_high': int,
-    'threshold_free_disk_percentage_medium': int,
     'threshold_free_disk_percentage_low': int,
+    'wbtip_timetolive': int,
     'basic_auth': bool,
     'basic_auth_username': unicode,
-    'basic_auth_password': unicode
+    'basic_auth_password': unicode,
+    'reachable_via_web': bool,
+    'anonymize_outgoing_connections': bool,
+    'enable_admin_exception_notification': bool,
+    'enable_developers_exception_notification': bool
 }
 
-AdminNotificationDesc = {
-    'server': unicode,
-    'port': int,
-    'security': unicode, # 'TLS' or 'SSL' only
-    'username': unicode,
-    'password': unicode,
-    'source_name': unicode,
-    'source_email': email_regexp,
-    'tip_mail_template': unicode,
-    'tip_mail_title': unicode,
-    'file_mail_template': unicode,
-    'file_mail_title': unicode,
-    'comment_mail_template': unicode,
-    'comment_mail_title': unicode,
-    'message_mail_template': unicode,
-    'message_mail_title': unicode,
-    'admin_pgp_alert_mail_template': unicode,
-    'admin_pgp_alert_mail_title': unicode,
-    'pgp_alert_mail_template': unicode,
-    'pgp_alert_mail_title': unicode,
-    'receiver_notification_limit_reached_mail_template': unicode,
-    'receiver_notification_limit_reached_mail_title': unicode,
-    'tip_expiration_mail_template': unicode,
-    'tip_expiration_mail_title': unicode,
-    'identity_access_authorized_mail_template': unicode,
-    'identity_access_authorized_mail_title': unicode,
-    'identity_access_denied_mail_template': unicode,
-    'identity_access_denied_mail_title': unicode,
-    'identity_access_request_mail_template': unicode,
-    'identity_access_request_mail_title': unicode,
-    'identity_provided_mail_template': unicode,
-    'identity_provided_mail_title': unicode,
-    'export_template': unicode,
-    'export_message_whistleblower': unicode,
-    'export_message_recipient': unicode,
-    'admin_anomaly_mail_template': unicode,
-    'admin_anomaly_mail_title': unicode,
-    'admin_anomaly_activities': unicode,
-    'admin_anomaly_disk_high': unicode,
-    'admin_anomaly_disk_medium': unicode,
-    'admin_anomaly_disk_low': unicode,
-    'admin_test_static_mail_template': unicode,
-    'admin_test_static_mail_title': unicode,
+AdminNotificationDesc = merge_dicts({
+    'smtp_server': unicode,
+    'smtp_port': int,
+    'smtp_security': unicode, # 'TLS' or 'SSL' only
+    'smtp_username': unicode,
+    'smtp_password': unicode,
+    'smtp_source_name': unicode,
+    'smtp_source_email': email_regexp,
     'disable_admin_notification_emails': bool,
     'disable_custodian_notification_emails': bool,
     'disable_receiver_notification_emails': bool,
-    'send_email_for_every_event': bool,
     'tip_expiration_threshold': int,
     'notification_threshold_per_hour': int,
-    'notification_suspension_time': int,
-    'reset_templates': bool,
-    'exception_email_address': email_regexp,
-    'exception_email_pgp_key_fingerprint': unicode,
-    'exception_email_pgp_key_expiration': unicode,
-    'exception_email_pgp_key_info': unicode,
-    'exception_email_pgp_key_public': unicode,
-    'exception_email_pgp_key_status': unicode,
-    'exception_email_pgp_key_remove': bool
-}
+    'reset_templates': bool
+  },
+  {k: unicode for k in NotificationL10NFactory.keys}
+)
 
 AdminFieldOptionDesc = {
     'id': uuid_regexp_or_empty,
     'label': unicode,
     'presentation_order': int,
     'score_points': int,
-    'trigger_field': uuid_regexp_or_empty,
-    'trigger_step': uuid_regexp_or_empty
+    'trigger_field': uuid_regexp_or_empty
 }
 
-AdminFieldOptionDescRaw = get_raw_request_format(AdminFieldOptionDesc, models.FieldOption.localized_keys)
+AdminFieldOptionDescRaw = get_multilang_request_format(AdminFieldOptionDesc, models.FieldOption.localized_keys)
 
 AdminFieldAttrDesc = {
     'id': uuid_regexp_or_empty,
@@ -311,16 +288,15 @@ AdminFieldAttrDesc = {
     'value': SkipSpecificValidation
 }
 
-AdminFieldAttrDescRaw = get_raw_request_format(AdminFieldAttrDesc, models.FieldAttr.localized_keys)
+AdminFieldAttrDescRaw = get_multilang_request_format(AdminFieldAttrDesc, models.FieldAttr.localized_keys)
 
 AdminFieldDesc = {
-    'id': uuid_regexp_or_empty,
-    'key': unicode,
+    'id': key_regexp_or_empty,
     'instance': field_instance_regexp,
     'editable': bool,
-    'template_id': uuid_regexp_or_empty,
+    'template_id': key_regexp_or_empty,
     'step_id': uuid_regexp_or_empty,
-    'fieldgroup_id': uuid_regexp_or_empty,
+    'fieldgroup_id': key_regexp_or_empty,
     'label': unicode,
     'description': unicode,
     'hint': unicode,
@@ -339,7 +315,7 @@ AdminFieldDesc = {
     'triggered_by_score': int
 }
 
-AdminFieldDescRaw = get_raw_request_format(AdminFieldDesc, models.Field.localized_keys)
+AdminFieldDescRaw = get_multilang_request_format(AdminFieldDesc, models.Field.localized_keys)
 AdminFieldDescRaw['options'] = [AdminFieldOptionDescRaw]
 # AdminFieldDescRaw['attrs']; FIXME: we still miss a way for validating a hierarchy where
 #                                    we have a variable dictionary like the attrs dictionary.
@@ -349,24 +325,20 @@ AdminStepDesc = {
     'label': unicode,
     'description': unicode,
     'children': [AdminFieldDesc],
-    'questionnaire_id': uuid_regexp,
-    'presentation_order': int,
-    'triggered_by_score': int
+    'questionnaire_id': key_regexp_or_empty,
+    'presentation_order': int
 }
 
-AdminStepDescRaw = get_raw_request_format(AdminStepDesc, models.Step.localized_keys)
+AdminStepDescRaw = get_multilang_request_format(AdminStepDesc, models.Step.localized_keys)
 AdminStepDescRaw['children'] = [AdminFieldDescRaw]
 
 AdminQuestionnaireDesc = {
-    'id': uuid_regexp_or_empty,
-    'key': unicode,
+    'id': key_regexp_or_empty,
     'name': unicode,
-    'show_steps_navigation_bar': bool,
-    'steps_navigation_requires_completion': bool,
     'steps': [AdminStepDesc]
 }
 
-AdminQuestionnaireDescRaw = get_raw_request_format(AdminQuestionnaireDesc, models.Questionnaire.localized_keys)
+AdminQuestionnaireDescRaw = get_multilang_request_format(AdminQuestionnaireDesc, models.Questionnaire.localized_keys)
 AdminQuestionnaireDescRaw['steps'] = [AdminStepDescRaw]
 
 AdminContextDesc = {
@@ -386,23 +358,44 @@ AdminContextDesc = {
     'enable_two_way_comments': bool,
     'enable_two_way_messages': bool,
     'enable_attachments': bool,
+    'enable_rc_to_wb_files': bool,
     'presentation_order': int,
+    'recipients_clarification': unicode,
     'status_page_message': unicode,
     'show_receivers_in_alphabetical_order': bool,
-    'questionnaire_id': unicode
+    'questionnaire_id': key_regexp_or_empty
 }
-
-AdminContextDescRaw = get_raw_request_format(AdminContextDesc, models.Context.localized_keys)
 
 AdminReceiverDesc = {
     'id': uuid_regexp_or_empty,
-    'contexts': [uuid_regexp],
     'can_delete_submission': bool,
     'can_postpone_expiration': bool,
     'can_grant_permissions': bool,
     'tip_notification': bool,
-    'presentation_order': int,
     'configuration': unicode
+}
+
+AdminTLSCertFilesConfigDesc = {
+    'priv_key': unicode,
+    'chain': unicode,
+    'cert': unicode,
+}
+
+AdminTLSCfgFileResourceDesc = {
+    'name': unicode,
+    'content': unicode,
+}
+
+AdminCSRFileDesc = {
+    'name': short_text_regexp,
+    'content': {
+      'country': r'[A-Za-z]{2}',
+      'province': short_text_regexp,
+      'city': short_text_regexp,
+      'company': short_text_regexp,
+      'department': short_text_regexp,
+      'email': email_regexp
+    }
 }
 
 AdminShortURLDesc = {
@@ -417,23 +410,20 @@ NodeDesc = {
     'footer': unicode,
     'security_awareness_title': unicode,
     'security_awareness_text': unicode,
-    'hidden_service': hidden_service_regexp_or_empty,
-    'public_site': https_url_regexp_or_empty,
+    'hostname': hostname_regexp_or_empty,
+    'rootdomain': hostname_regexp_or_empty,
+    'tb_download_link': https_url_regexp,
     'languages_enabled': [unicode],
     'languages_supported': list,
     'default_language': unicode,
-    'maximum_namesize': int,
-    'maximum_textsize': int,
     'maximum_filesize': int,
-    'tor2web_admin': bool,
-    'tor2web_custodian': bool,
-    'tor2web_whistleblower': bool,
-    'tor2web_receiver': bool,
-    'tor2web_unauth': bool,
+    'https_admin': bool,
+    'https_custodian': bool,
+    'https_whistleblower': bool,
+    'https_receiver': bool,
     'can_postpone_expiration': bool,
     'can_delete_submission': bool,
     'can_grant_permissions': bool,
-    'ahmia': bool,
     'allow_indexing': bool,
     'allow_unencrypted': bool,
     'disable_privacy_badge': bool,
@@ -444,49 +434,25 @@ NodeDesc = {
     'enable_captcha': bool,
     'enable_proof_of_work':  bool,
     'enable_custom_privacy_badge': bool,
-    'custom_privacy_badge_tor': unicode,
-    'custom_privacy_badge_none': unicode,
+    'custom_privacy_badge_text': unicode,
     'widget_comments_title': unicode,
     'widget_messages_title': unicode,
     'widget_files_title': unicode
 }
 
 TipOverviewDesc = {
-    'context_id': uuid_regexp,
-    'creation_lifetime': DateType,
-    'receivertips': list,
-    'creation_date': DateType,
-    'context_name': unicode,
     'id': uuid_regexp,
-    'wb_access_counter': int,
-    'internalfiles': list,
-    'comments': list,
-    'wb_last_access': unicode,
+    'context_id': uuid_regexp,
+    'creation_date': DateType,
     'expiration_date': DateType
 }
 
 TipsOverviewDesc = [TipOverviewDesc]
 
-UserOverviewDesc = {
-    'receivertips': list,
-    'receiverfiles': list,
-    'pgp_key_status': unicode,
-    'id': uuid_regexp,
-    'name': unicode
-}
-
-UsersOverviewDesc = [UserOverviewDesc]
-
 FileOverviewDesc = {
-    'rfiles': int,
-    'stored': bool,
-    'name': unicode,
-    'content_type': unicode,
-    'itip': uuid_regexp,
-    'path': unicode,
-    'creation_date': DateType,
     'id': uuid_regexp,
-    'size': int
+    'itip': uuid_regexp,
+    'path': unicode
 }
 
 ReceiverIdentityAccessRequestDesc = {
@@ -519,12 +485,12 @@ AnomalyCollectionDesc = [AnomalyDesc]
 
 ReceiverDesc = {
     'name': unicode,
-    'contexts': [uuid_regexp],
     'description': unicode,
-    'presentation_order': int,
-    'pgp_key_status': unicode,
     'id': uuid_regexp,
-    'state': user_states_regexp
+    'state': user_states_regexp,
+    'can_delete_submission': bool,
+    'can_postpone_expiration': bool,
+    'can_grant_permissions': bool
 }
 
 ReceiverCollectionDesc = [ReceiverDesc]
@@ -546,26 +512,16 @@ ContextDesc = {
     'enable_messages': bool,
     'enable_two_way_messages': bool,
     'enable_attachments': bool,
-    'show_receivers_in_alphabetical_order': bool
+    'show_receivers_in_alphabetical_order': bool,
+    'picture': unicode
 }
 
 ContextCollectionDesc = [ContextDesc]
 
-AhmiaDesc = {
-    'description': unicode,
-    'language': unicode,
-    'title': unicode,
-    'contactInformation': unicode,
-    'relation': unicode,
-    'keywords': unicode,
-    'type': unicode
-}
-
-StaticFileDesc = {
-    'size': int,
-    'filelocation': unicode,
-    'content_type': unicode,
-    'filename': unicode
+PublicResourcesDesc = {
+    'node': NodeDesc,
+    'contexts': [ContextDesc],
+    'receivers': [ReceiverDesc]
 }
 
 InternalTipDesc = {
@@ -580,35 +536,24 @@ InternalTipDesc = {
     'identity_provided': bool
 }
 
-WizardAdminDesc = {
-    'password': unicode,
-    'old_password': unicode,
-    'mail_address': unicode
+WizardDesc = {
+    'node_name': unicode,
+    'admin_name': unicode,
+    'admin_password': unicode,
+    'admin_mail_address': unicode,
+    'receiver_name': unicode,
+    'receiver_mail_address': unicode,
+    'profile': r'^(default)$',
+    'enable_developers_exception_notification': bool
 }
 
-WizardStepDesc = {
-    'label': dict,
-    'hint': dict,
-    'description': dict,
-    'children': list
-}
-
-WizardNodeDesc = {
-    'presentation': dict,
-    'footer': dict
-}
-
-WizardAppdataDesc = {
-    'version': int,
-    'fields': [WizardStepDesc],
-    'node': WizardNodeDesc
-}
-
-WizardFirstSetupDesc = {
-    'node': AdminNodeDesc,
-    'admin': WizardAdminDesc,
-    'receiver': AdminUserDesc,
-    'context': AdminContextDesc
+SignupDesc = {
+    'subdomain': unicode,
+    'name': unicode,
+    'surname': unicode,
+    'email': unicode,
+    'use_case': unicode,
+    'use_case_other': unicode
 }
 
 ExceptionDesc = {

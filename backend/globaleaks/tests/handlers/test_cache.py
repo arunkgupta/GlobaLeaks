@@ -1,50 +1,33 @@
 # -*- coding: utf-8 -*-
 from twisted.internet.defer import inlineCallbacks
 
-from globaleaks.orm import transact
-from globaleaks.rest.apicache import GLApiCache
+from globaleaks.rest.apicache import ApiCache, gzipdata
 from globaleaks.tests import helpers
 
 
-class TestGLApiCache(helpers.TestGL):
+class TestApiCache(helpers.TestGL):
     @inlineCallbacks
     def setUp(self):
         yield helpers.TestGL.setUp(self)
 
-        GLApiCache.invalidate()
+        ApiCache.invalidate()
 
-    @staticmethod
-    @transact
-    def mario(store, arg1, arg2, arg3):
-        return arg1 + " " + arg2 + " " + arg3
-
-    @inlineCallbacks
-    def test_get(self):
-        self.assertTrue("passante_di_professione" not in GLApiCache.memory_cache_dict)
-        pdp_it = yield GLApiCache.get("passante_di_professione", "it", self.mario, "come", "una", "catapulta!")
-        pdp_en = yield GLApiCache.get("passante_di_professione", "en", self.mario, "like", "a", "catapult!")
-        self.assertTrue("passante_di_professione" in GLApiCache.memory_cache_dict)
-        self.assertTrue("it" in GLApiCache.memory_cache_dict['passante_di_professione'])
-        self.assertTrue("en" in GLApiCache.memory_cache_dict['passante_di_professione'])
-        self.assertEqual(pdp_it, "come una catapulta!")
-        self.assertEqual(pdp_en, "like a catapult!")
-
-    @inlineCallbacks
-    def test_set(self):
-        self.assertTrue("passante_di_professione" not in GLApiCache.memory_cache_dict)
-        pdp_it = yield GLApiCache.get("passante_di_professione", "it", self.mario, "come", "una", "catapulta!")
-        self.assertTrue("passante_di_professione" in GLApiCache.memory_cache_dict)
-        self.assertTrue(pdp_it == "come una catapulta!")
-        yield GLApiCache.set("passante_di_professione", "it", "ma io ho visto tutto!")
-        self.assertTrue("passante_di_professione" in GLApiCache.memory_cache_dict)
-        pdp_it = yield GLApiCache.get("passante_di_professione", "it", self.mario, "already", "cached")
-        self.assertEqual(pdp_it, "ma io ho visto tutto!")
-
-    @inlineCallbacks
-    def test_invalidate(self):
-        self.assertTrue("passante_di_professione" not in GLApiCache.memory_cache_dict)
-        pdp_it = yield GLApiCache.get("passante_di_professione", "it", self.mario, "come", "una", "catapulta!")
-        self.assertTrue("passante_di_professione" in GLApiCache.memory_cache_dict)
-        self.assertEqual(pdp_it, "come una catapulta!")
-        yield GLApiCache.invalidate("passante_di_professione")
-        self.assertTrue("passante_di_professione" not in GLApiCache.memory_cache_dict)
+    def test_cache(self):
+        self.assertEqual(ApiCache.memory_cache_dict, {})
+        self.assertIsNone(ApiCache.get(1, "passante_di_professione", "it"))
+        self.assertIsNone(ApiCache.get(1, "passante_di_professione", "en"))
+        self.assertIsNone(ApiCache.get(2, "passante_di_professione", "ca"))
+        ApiCache.set(1, "passante_di_professione", "it", 'text/plain', 'ititit')
+        ApiCache.set(1, "passante_di_professione", "en", 'text/plain', 'enenen')
+        ApiCache.set(2, "passante_di_professione", "ca", 'text/plain', 'cacaca')
+        self.assertTrue("passante_di_professione" in ApiCache.memory_cache_dict[1])
+        self.assertTrue("passante_di_professione" in ApiCache.memory_cache_dict[2])
+        self.assertIsNone(ApiCache.get(1, "passante_di_professione", "ca"))
+        self.assertTrue("it" in ApiCache.memory_cache_dict[1]['passante_di_professione'])
+        self.assertTrue("en" in ApiCache.memory_cache_dict[1]['passante_di_professione'])
+        self.assertIsNone(ApiCache.get(1, "passante_di_professione", "ca"))
+        self.assertEqual(ApiCache.get(1, "passante_di_professione", "it")[1], gzipdata('ititit'))
+        self.assertEqual(ApiCache.get(1, "passante_di_professione", "en")[1], gzipdata('enenen'))
+        self.assertEqual(ApiCache.get(2, "passante_di_professione", "ca")[1], gzipdata('cacaca'))
+        ApiCache.invalidate()
+        self.assertEqual(ApiCache.memory_cache_dict, {})

@@ -1,6 +1,6 @@
 #include <tunables/global>
 
-profile usr.bin.globaleaks {
+profile usr.bin.globaleaks flags=(attach_disconnected) {
     #include <abstractions/base>
     #include <abstractions/nameservice>
 
@@ -12,7 +12,14 @@ profile usr.bin.globaleaks {
     capability dac_override,
     capability sys_tty_config,
 
-    /proc/*/mounts r,
+    /etc/lsb-release r,
+    /etc/mime.types r,
+    /etc/python2.7/** r,
+
+    @{PROC}/ r,
+    @{PROC}/@{pid}/fd/ r,
+    @{PROC}/@{pid}/status r,
+    owner @{PROC}/@{pid}/mounts r,
 
     /usr/bin/ r,
     /usr/bin/globaleaks r,
@@ -23,16 +30,20 @@ profile usr.bin.globaleaks {
     /bin/dash ix,
     /usr/bin/gpg ix,
 
+    /usr/bin/python2.7 ix,
+
+    /usr/ r,
     /usr/share/** r,
     /usr/include/python2.7/** r,
     /usr/lib/python2.7/** mr,
     /usr/local/lib/python2.7/** mr,
-    /etc/python2.7/** r,
-    /etc/mime.types r,
 
-    /var/globaleaks/ r,
+    /var/globaleaks/ wr,
     /var/globaleaks/** lrwk,
+
     /{,var/}run/globaleaks/globaleaks.pid rw,
+    /{,var/}run/tor/control rw,
+    /{,var/}run/tor/control.authcookie r,
 
     /{run,dev}/shm/ r,
     /{run,dev}/shm/globaleaks/ rwk,

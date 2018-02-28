@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-import json
-
-from twisted.internet.defer import inlineCallbacks
-from globaleaks.tests import helpers
 from globaleaks.handlers import wbtip
+from globaleaks.tests import helpers
+from twisted.internet.defer import inlineCallbacks
 
 
 class TestWBTipInstance(helpers.TestHandlerWithPopulatedDB):
@@ -31,14 +29,6 @@ class TestWBTipCommentCollection(helpers.TestHandlerWithPopulatedDB):
         yield self.perform_full_submission_actions()
 
     @inlineCallbacks
-    def test_get(self):
-        wbtips_desc = yield self.get_wbtips()
-        for wbtip_desc in wbtips_desc:
-            handler = self.request(role='whistleblower', user_id = wbtip_desc['id'])
-
-            yield handler.get()
-
-    @inlineCallbacks
     def test_post(self):
         body = {
             'content' : "can you provide an evidence of what you are telling?",
@@ -46,9 +36,10 @@ class TestWBTipCommentCollection(helpers.TestHandlerWithPopulatedDB):
 
         wbtips_desc = yield self.get_wbtips()
         for wbtip_desc in wbtips_desc:
-            handler = self.request(role='whistleblower', user_id = wbtip_desc['id'], body=json.dumps(body))
+            handler = self.request(body, role='whistleblower', user_id = wbtip_desc['id'])
 
             yield handler.post()
+
 
 class TestWBTipMessageCollection(helpers.TestHandlerWithPopulatedDB):
     _handler = wbtip.WBTipMessageCollection
@@ -75,26 +66,10 @@ class TestWBTipMessageCollection(helpers.TestHandlerWithPopulatedDB):
 
         wbtips_desc = yield self.get_wbtips()
         for wbtip_desc in wbtips_desc:
-            handler = self.request(role='whistleblower', user_id = wbtip_desc['id'], body=json.dumps(body))
+            handler = self.request(body, role='whistleblower', user_id = wbtip_desc['id'])
 
             for rcvr_id in wbtip_desc['receivers_ids']:
                 yield handler.post(rcvr_id)
-
-class TestWBTipReceiversCollection(helpers.TestHandlerWithPopulatedDB):
-    _handler = wbtip.WBTipReceiversCollection
-
-    @inlineCallbacks
-    def setUp(self):
-        yield helpers.TestHandlerWithPopulatedDB.setUp(self)
-        yield self.perform_full_submission_actions()
-
-    @inlineCallbacks
-    def test_get(self):
-        wbtips_desc = yield self.get_wbtips()
-        for wbtip_desc in wbtips_desc:
-            handler = self.request(role='whistleblower', user_id = wbtip_desc['id'])
-
-            yield handler.get()
 
 
 class WBTipIdentityHandler(helpers.TestHandlerWithPopulatedDB):
@@ -122,6 +97,6 @@ class WBTipIdentityHandler(helpers.TestHandlerWithPopulatedDB):
 
         wbtips_desc = yield self.get_wbtips()
         for wbtip_desc in wbtips_desc:
-            handler = self.request(role='whistleblower', user_id = wbtip_desc['id'], body=json.dumps(body))
+            handler = self.request(body, role='whistleblower', user_id = wbtip_desc['id'])
 
             yield handler.post(wbtip_desc['id'])

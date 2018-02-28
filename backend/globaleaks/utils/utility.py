@@ -1,31 +1,96 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #   utility
 #   *******
 #
-# GlobaLeaks Utility Functions
+# Utility Functions
 from __future__ import print_function
 
 import cgi
 import codecs
-import ctypes
-import inspect
+import glob
+import json
 import logging
 import os
+import re
 import sys
-import time
 import traceback
 import uuid
 from datetime import datetime, timedelta
 
+
+from txsocksx.errors import TTLExpired, ConnectionRefused, ServerFailure
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred
+from twisted.internet.error import ConnectionLost, ConnectionRefusedError, DNSLookupError, TimeoutError
 from twisted.python import log as twlog
-from twisted.python import logfile as twlogfile
-from twisted.python import util
-from twisted.python.failure import Failure
+from twisted.python import util, failure
+from twisted.web.http import _escape
+from twisted.web._newclient import ResponseNeverReceived, ResponseFailed
 
 from globaleaks import LANGUAGES_SUPPORTED_CODES
-from globaleaks.settings import GLSettings
+
+
+FAILURES_NET_OUTGOING = (
+    ConnectionLost,
+    ConnectionRefusedError,
+    ResponseNeverReceived,
+    ResponseFailed,
+    DNSLookupError,
+    TimeoutError,
+)
+
+
+FAILURES_TOR_OUTGOING = (
+    ConnectionRefusedError,
+    ResponseNeverReceived,
+    ResponseFailed,
+    TTLExpired,
+    RuntimeError,
+    ConnectionRefused,
+    ServerFailure,
+    TimeoutError,
+)
+
+
+def get_disk_space(path):
+    statvfs = os.statvfs(path)
+    free_bytes = statvfs.f_frsize * statvfs.f_bavail
+    total_bytes = statvfs.f_frsize * statvfs.f_blocks
+    return free_bytes, total_bytes
+
+
+def read_file(p):
+    with file(p, 'r') as f:
+        return f.read().rstrip("\n")
+
+
+def read_json_file(p):
+    return json.loads(read_file(p))
+
+
+def drop_privileges(user, uid, gid):
+    if os.getgid() != gid:
+        os.setgid(gid)
+        os.initgroups(user, gid)
+
+    if os.getuid() != uid:
+        os.setuid(uid)
+
+
+def fix_file_permissions(path, uid, gid, dchmod, fchmod):
+    """
+    Recursively fix file permissions on a given path
+    """
+    def fix(path):
+        os.chown(path, uid, gid)
+        if os.path.isfile(path):
+            os.chmod(path, 0o600)
+        else:
+            os.chmod(path, 0o700)
+
+    fix(path)
+    for item in glob.glob(path + '/*'):
+        fix_file_permissions(item, uid, gid, dchmod, fchmod)
 
 
 def uuid4():
@@ -44,56 +109,49 @@ def sum_dicts(*dicts):
         for k, v in d.items():
             ret[k] = v
 
-    return dict(ret)
-
-
-def every_language(default_text):
-    ret = {}
-
-    for code in LANGUAGES_SUPPORTED_CODES:
-        ret.update({code : default_text})
-
     return ret
 
 
-def randint(start, end=None):
-    if end is None:
-        end = start
-        start = 0
-    w = end - start + 1
-    return start + int(''.join("%x" % ord(x) for x in os.urandom(w)), 16) % w
-
-
-def randbits(bits):
-    return os.urandom(int(bits/8))
-
-
-def choice(population):
-    return population[randint(len(population) - 1)]
-
-
-def shuffle(x):
-    for i in reversed(xrange(1, len(x))):
-        j = randint(0, i)
-        x[i], x[j] = x[j], x[i]
-    return x
+def every_language_dict(default_text=''):
+    return {code : default_text for code in LANGUAGES_SUPPORTED_CODES}
 
 
 def deferred_sleep(timeout):
     d = Deferred()
 
-    def callbackDeferred():
-        d.callback(True)
-
-    reactor.callLater(timeout, callbackDeferred)
+    reactor.callLater(timeout, d.callback, True)
 
     return d
+
+
+def is_common_net_error(tenant_state, excep):
+    """
+    Catches known errors that the twisted.web.client.Agent or txsocksx.http.SOCKS5Agent
+    can throw while connecting through their respective networks.
+    """
+    if not tenant_state.anonymize_outgoing_connections and \
+       isinstance(excep, FAILURES_NET_OUTGOING):
+        return True
+
+    if tenant_state.anonymize_outgoing_connections and \
+       isinstance(excep, FAILURES_TOR_OUTGOING):
+        return True
+
+    return False
+
+
+def msdos_encode(s):
+    """
+    This functions returns a new string with all occurences of newlines
+    preprended with a carriage return.
+    """
+    return re.sub(r'(\r\n)|(\n)', '\r\n', s)
 
 
 def log_encode_html(s):
     """
     This function encodes the following characters
-    using HTML encoding: < > & ' " \ / 
+    using HTML encoding: < > & ' " \ /
     """
     s = cgi.escape(s, True)
     s = s.replace("'", "&#39;")
@@ -120,12 +178,31 @@ def log_remove_escapes(s):
             return codecs.encode(unicodelogmsg, 'unicode_escape')
 
 
-class GLLogObserver(twlog.FileLogObserver):
-    suppressed = 0
-    limit_suppressed = 1
-    last_exception_msg = ""
+def timedLogFormatter(timestamp, request):
+    duration = -1
+    if hasattr(request, 'start_time'):
+        duration = timedelta_to_milliseconds(datetime.now() - request.start_time)
 
+    return (u'[-] [%(tid)s] %(code)s %(method)s %(uri)s %(length)dB %(duration)dms' % dict(
+              duration=duration,
+              method=_escape(request.method),
+              uri=_escape(request.uri),
+              proto=_escape(request.clientproto),
+              code=request.code,
+              length=request.sentLength,
+              tid=request.tid))
+
+
+class GLLogObserver(twlog.FileLogObserver):
+    """
+    Tracks and logs exceptions generated within the application
+    """
     def emit(self, eventDict):
+        """
+        Handles formatting system log messages along with incrementing the objs
+        error counters. The eventDict is generated by the arguments passed to each
+        log level call. See the unittests for an example.
+        """
         if 'failure' in eventDict:
             vf = eventDict['failure']
             e_t, e_v, e_tb = vf.type, vf.value, vf.getTracebackObject()
@@ -137,129 +214,78 @@ class GLLogObserver(twlog.FileLogObserver):
 
         timeStr = self.formatTime(eventDict['time'])
         fmtDict = {'system': eventDict['system'], 'text': text.replace("\n", "\n\t")}
+
         msgStr = twlog._safeFormat("[%(system)s] %(text)s\n", fmtDict)
 
-        if GLLogObserver.suppressed == GLLogObserver.limit_suppressed:
-            GLLogObserver.suppressed = 0
-            GLLogObserver.limit_suppressed += 5
-            GLLogObserver.last_exception_msg = ""
-
-        try:
-            # in addition to escape sequence removal on logfiles we also quote html chars
-            util.untilConcludes(self.write, timeStr + " " + log_encode_html(msgStr))
-            util.untilConcludes(self.flush) # Hoorj!
-        except Exception as excep:
-            GLLogObserver.suppressed += 1
-            GLLogObserver.last_exception_msg = str(excep)
+        util.untilConcludes(self.write, timeStr + " " + log_encode_html(msgStr))
+        util.untilConcludes(self.flush)
 
 
 class Logger(object):
     """
     Customized LogPublisher
     """
-    def _str(self, msg):
+    loglevel = logging.ERROR
+
+    def setloglevel(self, loglevel):
+        self.loglevel = loglevel
+
+    def _print_logline(self, prefix, msg, *args, **kwargs):
+        if not isinstance(msg, str) and not isinstance(msg, unicode):
+            msg = str(msg)
+
         if isinstance(msg, unicode):
             msg = msg.encode('utf-8')
 
-        return log_remove_escapes(msg)
+        msg = (msg % args) if args else msg
+
+        msg = log_remove_escapes(msg)
+
+        tid = kwargs.get('tid', None)
+        p = '[%s]' % prefix if tid is None else '[%s] [%d]' % (prefix, tid)
+
+        print(p, msg)
+
+    def debug(self, msg, *args, **kwargs):
+        if self.loglevel and self.loglevel <= logging.DEBUG:
+            self._print_logline('D', msg, *args, **kwargs)
+
+    def info(self, msg, *args, **kwargs):
+        if self.loglevel and self.loglevel <= logging.INFO:
+            self._print_logline('I', msg, *args, **kwargs)
+
+    def err(self, msg, *args, **kwargs):
+        if self.loglevel:
+            self._print_logline('E', msg, *args, **kwargs)
 
     def exception(self, error):
         """
-        Error can either be an error message to print to stdout and to the logfile
-        or it can be a twisted.python.failure.Failure instance.
+        Formats exceptions for output to logs and/or stdout
+
+        :param error:
+        :type error: Exception or `twisted.python.failure.Failure`
         """
-        if isinstance(error, Failure):
+        if isinstance(error, failure.Failure):
             error.printTraceback()
         else:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             traceback.print_exception(exc_type, exc_value, exc_traceback)
 
-    def info(self, msg):
-        if GLSettings.loglevel and GLSettings.loglevel <= logging.INFO:
-            print("[-] %s" % self._str(msg))
-
-    def err(self, msg):
-        if GLSettings.loglevel:
-            twlog.err("[!] %s" % self._str(msg))
-
-    def debug(self, msg):
-        if GLSettings.loglevel and GLSettings.loglevel <= logging.DEBUG:
-            print("[D] %s" % self._str(msg))
-
-    def time_debug(self, msg):
-        # read the command in settings.py near 'verbosity_dict'
-        if GLSettings.loglevel and GLSettings.loglevel <= (logging.DEBUG - 1):
-            print("[T] %s" % self._str(msg))
-
-    def msg(self, msg):
-        if GLSettings.loglevel:
-            twlog.msg("[ ] %s" % self._str(msg))
-
-    def start_logging(self):
-        """
-        If configured enables logserver
-        """
-        twlog.startLogging(sys.stdout)
-        if GLSettings.logfile:
-            name = os.path.basename(GLSettings.logfile)
-            directory = os.path.dirname(GLSettings.logfile)
-
-            logfile = twlogfile.LogFile(name, directory,
-                                        rotateLength=GLSettings.log_file_size,
-                                        maxRotatedFiles=GLSettings.num_log_files)
-            twlog.addObserver(GLLogObserver(logfile).emit)
-
 
 log = Logger()
 
 
-def query_yes_no(question, default="no"):
-    """
-    Ask a yes/no question via raw_input() and return their answer.
-
-    "question" is a string that is presented to the user.
-
-    "default" is the presumed answer if the user just hits <Enter>.
-              It must be "yes" (the default), "no" or None (meaning
-              an answer is required of the user).
-
-    The "answer" return value is one of "yes" or "no".
-    """
-    valid = {"y":True, "n":False}
-    if default is None:
-        prompt = " [y/n] "
-    elif default == "yes":
-        prompt = " [Y/n] "
-    elif default == "no":
-        prompt = " [y/N] "
-    else:
-        raise ValueError("invalid default answer: '%s'" % default)
-
-    while True:
-        sys.stdout.write(question + prompt)
-        choice = raw_input().lower()
-        if default is not None and choice == '':
-            return valid[default]
-        elif choice in valid:
-            return valid[choice]
-        else:
-            sys.stdout.write("Please respond with 'y' or 'n'\n\n")
-
-
 ## time facilities ##
 
-def time_now():
-    """
-    @return: current timestamp
-    """
-    return time.time()
+def iso_strf_time(d):
+    return d.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 def datetime_null():
     """
     @return: a utc datetime object representing a null date
     """
-    return datetime.utcfromtimestamp(0)
+    return datetime(1970, 1, 1, 0, 0)
 
 
 def datetime_now():
@@ -269,30 +295,22 @@ def datetime_now():
     return datetime.utcnow()
 
 
-def utc_dynamic_date(start_date, seconds=0, minutes=0, hours=0):
+def datetime_never():
     """
-    @param start_date: a date stored in a db
-    seconds/minutes/hours = the amount of future you want
-    @return: a datetime object, as base of the sum
+    @return: a utc datetime object representing the 1st January 3000
     """
-    return start_date + timedelta(seconds=(seconds + (minutes * 60) + (hours * 3600)))
+    return datetime(3000, 1, 1, 0, 0)
 
 
-def utc_past_date(seconds=0, minutes=0, hours=0):
+def get_expiration(days):
     """
-    @return a date in the past with the specified delta
+    @return: a utc datetime object representing an expiration time calculated as the current date + N days
     """
-    return utc_dynamic_date(datetime_now()) - timedelta(seconds=(seconds + (minutes * 60) + (hours * 3600)))
+    date = datetime.utcnow()
+    return datetime(year=date.year, month=date.month, day=date.day, hour=00, minute=00, second=00) + timedelta(days=days+1)
 
 
-def utc_future_date(seconds=0, minutes=0, hours=0):
-    """
-    @return a date in the future with the specified delta
-    """
-    return utc_dynamic_date(datetime_now(), seconds, minutes, hours)
-
-
-def is_expired(check_date, seconds=0, minutes=0, hours=0, day=0):
+def is_expired(check_date, seconds=0, minutes=0, hours=0, days=0):
     """
     @param check_date: a datetime or a timestap
     @param seconds, minutes, hours, day
@@ -301,10 +319,7 @@ def is_expired(check_date, seconds=0, minutes=0, hours=0, day=0):
         if now > check_date + (seconds+minutes+hours)
         True is returned, else False
     """
-    if not check_date:
-        return False
-
-    total_hours = (day * 24) + hours
+    total_hours = (days * 24) + hours
     check = check_date + timedelta(seconds=seconds, minutes=minutes, hours=total_hours)
 
     return datetime_now() > check
@@ -326,41 +341,20 @@ def ISO8601_to_datetime(isodate):
     """
     isodate = isodate[:19] # we srip the eventual Z at the end
 
-    try:
-        ret = datetime.strptime(isodate, "%Y-%m-%dT%H:%M:%S")
-    except ValueError :
-        ret = datetime.strptime(isodate, "%Y-%m-%dT%H:%M:%S.%f")
-        ret.replace(microsecond=0)
-    return ret
+    return datetime.strptime(isodate, "%Y-%m-%dT%H:%M:%S")
 
 
 def datetime_to_pretty_str(date):
     """
     print a datetime in pretty formatted str format
     """
-    if date is None:
-        date = datetime_null()
-
     return date.strftime("%A %d %B %Y %H:%M (UTC)")
-
-
-def datetime_to_day_str(date):
-    """
-    print a datetime in DD/MM/YYYY formatted str
-    """
-    if date is None:
-        date = datetime_null()
-
-    return date.strftime("%d/%m/%Y")
 
 
 def ISO8601_to_day_str(isodate, tz=0):
     """
     print a ISO8601 in DD/MM/YYYY formatted str
     """
-    if isodate is None:
-        isodate = datetime_null().isoformat()
-
     date = datetime(year=int(isodate[0:4]),
                     month=int(isodate[5:7]),
                     day=int(isodate[8:10]),
@@ -368,7 +362,7 @@ def ISO8601_to_day_str(isodate, tz=0):
                     minute=int(isodate[14:16]),
                     second=int(isodate[17:19]))
 
-    if tz:
+    if tz != 0:
         tz_i, tz_d = divmod(tz, 1)
         tz_d, _  = divmod(tz_d * 100, 1)
         date += timedelta(hours=tz_i, minutes=tz_d)
@@ -390,13 +384,35 @@ def ISO8601_to_pretty_str(isodate, tz=0):
                     minute=int(isodate[14:16]),
                     second=int(isodate[17:19]) )
 
-    if tz:
+    if tz != 0:
         tz_i, tz_d = divmod(tz, 1)
         tz_d, _  = divmod(tz_d * 100, 1)
         date += timedelta(hours=tz_i, minutes=tz_d)
         return date.strftime("%A %d %B %Y %H:%M")
 
     return datetime_to_pretty_str(date)
+
+
+def timedelta_to_milliseconds(t):
+    return (t.microseconds + (t.seconds + t.days * 24 * 3600) * 10**6) / 10**3.0
+
+
+def asn1_datestr_to_datetime(s):
+    """
+    Returns a datetime for the passed asn1 formatted string
+    """
+    return datetime.strptime(s[:14], "%Y%m%d%H%M%S")
+
+
+def format_cert_expr_date(s):
+    """
+    Takes a asn1 formatted date string and tries to create an expiration date
+    out of it. If that does not work, the returned expiration date is never.
+    """
+    try:
+        return asn1_datestr_to_datetime(s)
+    except:
+        return datetime_never()
 
 
 def iso_year_start(iso_year):
@@ -413,9 +429,6 @@ def iso_to_gregorian(iso_year, iso_week, iso_day):
 
 
 def bytes_to_pretty_str(b):
-    if b is None:
-        b = 0
-
     if isinstance(b, str):
         b = int(b)
 
@@ -426,50 +439,3 @@ def bytes_to_pretty_str(b):
         return "%dMB" % int(b / 1000000)
 
     return "%dKB" % int(b / 1000)
-
-
-def caller_name(skip=2):
-    """Get a name of a caller in the format module.class.method
-
-       `skip` specifies how many levels of stack to skip while getting caller
-       name. skip=1 means "who calls me", skip=2 "who calls my caller" etc.
-
-       An empty string is returned if skipped levels exceed stack height
-    """
-    stack = inspect.stack()
-    start = 0 + skip
-    if len(stack) < start + 1:
-        return ''
-    parentframe = stack[start][0]
-
-    name = []
-    module = inspect.getmodule(parentframe)
-    # `modname` can be None when frame is executed directly in console
-    # TODO(techtonik): consider using __main__
-    if module:
-        name.append(module.__name__)
-        # detect classname
-    if 'self' in parentframe.f_locals:
-        # I don't know any way to detect call from the object method
-        # XXX: there seems to be no way to detect static method call - it will
-        #      be just a function call
-        name.append(parentframe.f_locals['self'].__class__.__name__)
-    codename = parentframe.f_code.co_name
-    if codename != '<module>':  # top level usually
-        name.append( codename ) # function or a method
-
-    return ".".join(name)
-
-
-def disable_swap():
-    """
-    use mlockall() system call to prevent the procss to swap
-    """
-    libc = ctypes.CDLL("libc.so.6", use_errno=True)
-
-    MCL_CURRENT = 1
-    MCL_FUTURE = 2
-
-    log.debug("Using mlockall() system call to disable process swap")
-    if libc.mlockall(MCL_CURRENT | MCL_FUTURE):
-        log.err("mlockall failure: %s" % os.strerror(ctypes.get_errno()))

@@ -1,294 +1,210 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #
 #   user
 #   *****
 # Implementation of the User model functionalities
 #
-from twisted.internet.defer import inlineCallbacks
-
-from globaleaks import models, security
-from globaleaks.orm import transact, transact_ro
+from globaleaks import models
+from globaleaks.db import db_refresh_memory_variables
 from globaleaks.handlers.base import BaseHandler
 from globaleaks.handlers.user import parse_pgp_options, user_serialize_user
+from globaleaks.orm import transact
 from globaleaks.rest import requests, errors
-from globaleaks.rest.apicache import GLApiCache
-from globaleaks.settings import GLSettings
-from globaleaks.utils.structures import fill_localized_keys
-from globaleaks.utils.utility import log, datetime_now
+from globaleaks.state import State
+from globaleaks.utils import security
+from globaleaks.utils.structures import fill_localized_keys, get_localized_values
+from globaleaks.utils.utility import datetime_now
 
 
-def db_create_admin_user(store, request, language):
+def admin_serialize_receiver(session, receiver, user, language):
     """
-    Creates a new admin
-    Returns:
-        (dict) the admin descriptor
+    Serialize the specified receiver
+
+    :param language: the language in which to localize data
+    :return: a dictionary representing the serialization of the receiver
     """
-    user = db_create_user(store, request, language)
+    ret_dict = user_serialize_user(session, user, language)
 
-    log.debug("Created new admin")
+    ret_dict.update({
+        'can_delete_submission': receiver.can_delete_submission,
+        'can_postpone_expiration': receiver.can_postpone_expiration,
+        'can_grant_permissions': receiver.can_grant_permissions,
+        'mail_address': user.mail_address,
+        'configuration': receiver.configuration,
+        'tip_notification': receiver.tip_notification
+    })
 
-    return user
-
-@transact
-def create_admin_user(store, request, language):
-    return user_serialize_user(db_create_admin_user(store, request, language), language)
-
-
-def db_create_custodian_user(store, request, language):
-    """
-    Creates a new custodian
-    Returns:
-        (dict) the custodian descriptor
-    """
-    user = db_create_user(store, request, language)
-
-    log.debug("Created new custodian")
-
-    return user
+    return get_localized_values(ret_dict, receiver, receiver.localized_keys, language)
 
 
 @transact
-def create_custodian_user(store, request, language):
-    return user_serialize_user(db_create_custodian_user(store, request, language), language)
+def create_user(session, state, tid, request, language):
+    return user_serialize_user(session, db_create_user(session, state, tid, request, language), language)
 
 
-def db_create_receiver(store, request, language):
+def db_create_receiver_user(session, state, tid, request, language):
     """
     Creates a new receiver
     Returns:
         (dict) the receiver descriptor
     """
-    user = db_create_user(store, request, language)
-
     fill_localized_keys(request, models.Receiver.localized_keys, language)
 
-    receiver = models.Receiver(request)
+    user = db_create_user(session, state, tid, request, language)
 
-    # set receiver.id user.id
-    receiver.id = user.id
+    request['id'] = user.id
 
-    store.add(receiver)
+    receiver = models.db_forge_obj(session, models.Receiver, request)
 
-    contexts = request.get('contexts', [])
-    for context_id in contexts:
-        context = models.Context.get(store, context_id)
-        if not context:
-            raise errors.ContextIdNotFound
-        context.receivers.add(receiver)
+    return receiver, user
 
-    log.debug("Created new receiver")
-
-    return receiver
 
 @transact
-def create_receiver_user(store, request, language):
-    receiver = db_create_receiver(store, request, language)
-    return user_serialize_user(receiver.user, language)
+def create_receiver_user(session, state, tid, request, language):
+    receiver, user = db_create_receiver_user(session, state, tid, request, language)
+    return admin_serialize_receiver(session, receiver, user, language)
 
 
-def db_create_user(store, request, language):
+def create(state, tid, request, language):
+    if request['role'] not in ['admin', 'receiver', 'custodian']:
+        raise errors.InputValidationError
+
+    if request['role'] == 'receiver':
+        d = create_receiver_user(state, tid, request, language)
+    else:
+        d = create_user(state, tid, request, language)
+
+    return d
+
+
+def db_create_user(session, state, tid, request, language):
+    request['tid'] = tid
+
     fill_localized_keys(request, models.User.localized_keys, language)
 
     user = models.User({
+        'tid': tid,
         'username': request['username'],
         'role': request['role'],
         'state': u'enabled',
-        'deletable': request['deletable'],
         'name': request['name'],
         'description': request['description'],
-        'language': u'en',
-        'timezone': 0,
-        'password_change_needed': True,
+        'name': request['name'],
+        'language': language,
+        'password_change_needed': request['password_change_needed'],
         'mail_address': request['mail_address']
     })
 
-    if request['username'] == '':
+    if not request['username']:
         user.username = user.id
 
-    password = request['password']
-    if len(password) and password != GLSettings.default_password:
-        security.check_password_format(password)
+    if request['password']:
+        password = request['password']
+    elif user.role == 'receiver':
+        # code necessary because the user.role for recipient is receiver
+        password = 'recipient'
     else:
-        password = GLSettings.default_password
+        password = user.role
 
     user.salt = security.generateRandomSalt()
     user.password = security.hash_password(password, user.salt)
 
     # The various options related in manage PGP keys are used here.
-    parse_pgp_options(user, request)
+    parse_pgp_options(state, user, request)
 
-    store.add(user)
+    session.add(user)
+
+    session.flush()
 
     return user
 
 
-def db_admin_update_user(store, user_id, request, language):
+def db_admin_update_user(session, state, tid, user_id, request, language):
     """
     Updates the specified user.
-    raises: globaleaks.errors.ReceiverIdNotFound` if the receiver does not exist.
     """
-    user = models.User.get(store, user_id)
-    if not user:
-        raise errors.UserIdNotFound
-
     fill_localized_keys(request, models.User.localized_keys, language)
+
+    user = models.db_get(session, models.User, models.User.tid == tid, models.User.id == user_id)
 
     user.update(request)
 
     password = request['password']
-    if len(password):
-        security.check_password_format(password)
+    if password:
         user.password = security.hash_password(password, user.salt)
         user.password_change_date = datetime_now()
 
     # The various options related in manage PGP keys are used here.
-    parse_pgp_options(user, request)
+    parse_pgp_options(state, user, request)
+
+    if user.role == 'admin':
+        db_refresh_memory_variables(session, [tid])
 
     return user
 
 
 @transact
-def admin_update_user(store, user_id, request, language):
-    return user_serialize_user(db_admin_update_user(store, user_id, request, language), language)
-
-
-def db_get_user(store, user_id):
-    """
-    raises :class:`globaleaks.errors.UserIdNotFound` if the user does
-    not exist.
-    Returns:
-        (dict) the user
-    """
-    user = models.User.get(store, user_id)
-
-    if not user:
-        raise errors.UserIdNotFound
-
-    return user
-
-
-@transact_ro
-def get_user(store, user_id, language):
-    user = db_get_user(store, user_id)
-    return user_serialize_user(user, language)
-
-
-def db_get_admin_users(store):
-    return [user_serialize_user(user, GLSettings.memory_copy.default_language)
-            for user in store.find(models.User,models.User.role == u'admin')]
+def admin_update_user(session, state, tid, user_id, request, language):
+    return user_serialize_user(session, db_admin_update_user(session, state, tid, user_id, request, language), language)
 
 
 @transact
-def delete_user(store, user_id):
-    user = db_get_user(store, user_id)
+def get_user(session, tid, user_id, language):
+    user = models.db_get(session, models.User, models.User.tid == tid, models.User.id == user_id)
 
-    if not user.deletable:
-        raise errors.UserNotDeletable
-
-    store.remove(user)
+    return user_serialize_user(session, user, language)
 
 
-@transact_ro
-def get_user_list(store, language):
+def db_get_admin_users(session, tid):
+    return [user_serialize_user(session, user, State.tenant_cache[tid].default_language)
+            for user in session.query(models.User).filter(models.User.tid == tid, models.User.role ==u'admin')]
+
+
+@transact
+def get_user_list(session, tid, language):
     """
     Returns:
         (list) the list of users
     """
-    users = store.find(models.User)
-    return [user_serialize_user(user, language) for user in users]
+    users = session.query(models.User).filter(models.User.tid == tid)
+    return [user_serialize_user(session, user, language) for user in users]
 
 
 class UsersCollection(BaseHandler):
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
+    check_roles = 'admin'
+    cache_resource = True
+    invalidate_cache = True
+
     def get(self):
         """
         Return all the users.
-
-        Parameters: None
-        Response: adminUsersList
-        Errors: None
         """
-        response = yield get_user_list(self.request.language)
+        return get_user_list(self.request.tid, self.request.language)
 
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def post(self):
         """
         Create a new user
-
-        Request: AdminUserDesc
-        Response: AdminUserDesc
-        Errors: InvalidInputFormat, UserIdNotFound
         """
-        request = self.validate_message(self.request.body,
+        request = self.validate_message(self.request.content.read(),
                                         requests.AdminUserDesc)
 
-        if request['role'] == 'receiver':
-            response = yield create_receiver_user(request, self.request.language)
-        elif request['role'] == 'custodian':
-            response = yield create_custodian_user(request, self.request.language)
-        elif request['role'] == 'admin':
-            response = yield create_admin_user(request, self.request.language)
-
-        GLApiCache.invalidate()
-
-        self.set_status(201) # Created
-        self.write(response)
+        return create(self.state, self.request.tid, request, self.request.language)
 
 
 class UserInstance(BaseHandler):
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
-    def get(self, user_id):
-        """
-        Get the specified user.
+    check_roles = 'admin'
+    invalidate_cache = True
 
-        Parameters: user_id
-        Response: AdminUserDesc
-        Errors: InvalidInputFormat, UserIdNotFound
-        """
-        response = yield get_user(user_id, self.request.language)
-
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def put(self, user_id):
         """
         Update the specified user.
-
-        Parameters: user_id
-        Request: AdminUserDesc
-        Response: AdminUserDesc
-        Errors: InvalidInputFormat, UserIdNotFound
         """
-        request = self.validate_message(self.request.body, requests.AdminUserDesc)
+        request = self.validate_message(self.request.content.read(), requests.AdminUserDesc)
 
-        response = yield admin_update_user(user_id, request, self.request.language)
-        GLApiCache.invalidate()
+        return admin_update_user(self.state, self.request.tid, user_id, request, self.request.language)
 
-        self.set_status(201)
-        self.write(response)
-
-    @inlineCallbacks
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
     def delete(self, user_id):
         """
         Delete the specified user.
-
-        Parameters: user_id
-        Request: None
-        Response: None
-        Errors: InvalidInputFormat, UserIdNotFound
         """
-        yield delete_user(user_id)
-
-        GLApiCache.invalidate()
+        return models.delete(models.User, models.User.tid == self.request.tid, models.User.id == user_id)

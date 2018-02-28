@@ -1,70 +1,51 @@
-# -*- coding: UTF-8
-# user
-# ********
+# -*- coding: utf-8
 #
-# Implement the classes handling the requests performed to /user/* URI PATH
-
-from twisted.internet.defer import inlineCallbacks
-
+# Handlers dealing with user preferences
 from globaleaks import models
-from globaleaks.orm import transact, transact_ro
+from globaleaks.handlers.admin.modelimgs import db_get_model_img
 from globaleaks.handlers.base import BaseHandler
-from globaleaks.rest import requests, errors
-from globaleaks.security import change_password, GLBPGP
-from globaleaks.settings import GLSettings
+from globaleaks.orm import transact
+from globaleaks.rest import requests
+from globaleaks.state import State
+from globaleaks.utils.pgp import PGPContext
+from globaleaks.utils.security import change_password
 from globaleaks.utils.structures import get_localized_values
-from globaleaks.utils.utility import log, datetime_to_ISO8601, datetime_now
+from globaleaks.utils.utility import datetime_to_ISO8601, datetime_now, datetime_null
 
 
-def parse_pgp_options(user, request):
+def parse_pgp_options(state, user, request):
     """
     Used for parsing PGP key infos and fill related user configurations.
-
-    @param user: the user orm object
-    @param request: the dictionary containing the pgp infos to be parsed
-    @return: None
     """
     pgp_key_public = request['pgp_key_public']
     remove_key = request['pgp_key_remove']
 
-    if remove_key:
-        # In all the cases below, the key is marked disabled as request
-        user.pgp_key_status = u'disabled'
-        user.pgp_key_info = None
-        user.pgp_key_public = None
-        user.pgp_key_fingerprint = None
-        user.pgp_key_expiration = None
+    k = None
+    if not remove_key and pgp_key_public:
+        pgpctx = PGPContext(state.settings.tmp_path)
 
-    elif pgp_key_public != '':
-        gnob = GLBPGP()
+        k = pgpctx.load_key(pgp_key_public)
 
-        try:
-            result = gnob.load_key(pgp_key_public)
-
-            log.debug("PGP Key imported: %s" % result['fingerprint'])
-
-            user.pgp_key_status = u'enabled'
-            user.pgp_key_info = result['info']
-            user.pgp_key_public = pgp_key_public
-            user.pgp_key_fingerprint = result['fingerprint']
-            user.pgp_key_expiration = result['expiration']
-        except:
-            raise
-
-        finally:
-            # the finally statement is always called also if
-            # except contains a return or a raise
-            gnob.destroy_environment()
+    if k is not None:
+        user.pgp_key_public = pgp_key_public
+        user.pgp_key_fingerprint = k['fingerprint']
+        user.pgp_key_expiration = k['expiration']
+    else:
+        user.pgp_key_public = ''
+        user.pgp_key_fingerprint = ''
+        user.pgp_key_expiration = datetime_null()
 
 
-def user_serialize_user(user, language):
+def user_serialize_user(session, user, language):
     """
     Serialize user description
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param username: the username of the user to be serialized
     :return: a serialization of the object
     """
+    picture = db_get_model_img(session, user.tid, 'users', user.id)
+
     ret_dict = {
         'id': user.id,
         'username': user.username,
@@ -72,61 +53,49 @@ def user_serialize_user(user, language):
         'old_password': u'',
         'salt': '',
         'role': user.role,
-        'deletable': user.deletable,
         'state': user.state,
         'last_login': datetime_to_ISO8601(user.last_login),
         'name': user.name,
         'description': user.description,
         'mail_address': user.mail_address,
         'language': user.language,
-        'timezone': user.timezone,
         'password_change_needed': user.password_change_needed,
         'password_change_date': datetime_to_ISO8601(user.password_change_date),
-        'pgp_key_info': user.pgp_key_info,
         'pgp_key_fingerprint': user.pgp_key_fingerprint,
         'pgp_key_public': user.pgp_key_public,
         'pgp_key_expiration': datetime_to_ISO8601(user.pgp_key_expiration),
-        'pgp_key_status': user.pgp_key_status,
         'pgp_key_remove': False,
-        'picture': user.picture.data if user.picture is not None else ''
+        'picture': picture
     }
 
     return get_localized_values(ret_dict, user, user.localized_keys, language)
 
 
-@transact_ro
-def get_user_settings(store, user_id, language):
-    user = store.find(models.User, models.User.id == user_id).one()
+@transact
+def get_user_settings(session, tid, user_id, language):
+    user = models.db_get(session, models.User, models.User.id == user_id, models.User.tid == tid)
 
-    if not user:
-        raise errors.UserIdNotFound
-
-    return user_serialize_user(user, language)
+    return user_serialize_user(session, user, language)
 
 
-def db_user_update_user(store, user_id, request, language):
+def db_user_update_user(session, state, tid, user_id, request):
     """
     Updates the specified user.
     This version of the function is specific for users that with comparison with
     admins can change only few things:
       - preferred language
-      - preferred timezone
       - the password (with old password check)
       - pgp key
-    raises: globaleaks.errors.ReceiverIdNotFound` if the receiver does not exist.
+    raises: globaleaks.errors.ResourceNotFound` if the receiver does not exist.
     """
-    user = models.User.get(store, user_id)
+    user = models.db_get(session, models.User, models.User.id == user_id, models.User.tid == tid)
 
-    if not user:
-        raise errors.UserIdNotFound
-
-    user.language = request.get('language', GLSettings.memory_copy.default_language)
-    user.timezone = request.get('timezone', GLSettings.memory_copy.default_timezone)
+    user.language = request.get('language', State.tenant_cache[tid].default_language)
 
     new_password = request['password']
     old_password = request['old_password']
 
-    if len(new_password) and len(old_password):
+    if new_password and old_password:
         user.password = change_password(user.password,
                                         old_password,
                                         new_password,
@@ -138,53 +107,39 @@ def db_user_update_user(store, user_id, request, language):
         user.password_change_date = datetime_now()
 
     # The various options related in manage PGP keys are used here.
-    parse_pgp_options(user, request)
+    parse_pgp_options(state, user, request)
 
     return user
 
 
 @transact
-def update_user_settings(store, user_id, request, language):
-    user = db_user_update_user(store, user_id, request, language)
+def update_user_settings(session, state, tid, user_id, request, language):
+    user = db_user_update_user(session, state, tid, user_id, request)
 
-    return user_serialize_user(user, language)
+    return user_serialize_user(session, user, language)
 
 
 class UserInstance(BaseHandler):
     """
     This handler allow users to modify some of their fields:
         - language
-        - timezone
         - password
         - notification settings
         - pgp key
     """
-    @BaseHandler.authenticated('*')
-    @inlineCallbacks
+    check_roles = {'admin', 'receiver', 'custodian'}
+    invalidate_cache = True
+
     def get(self):
-        """
-        Parameters: None
-        Response: ReceiverReceiverDesc
-        Errors: UserIdNotFound, InvalidInputFormat, InvalidAuthentication
-        """
-        user_status = yield get_user_settings(self.current_user.user_id,
-                                              self.request.language)
+        return get_user_settings(self.request.tid,
+                                 self.current_user.user_id,
+                                 self.request.language)
 
-        self.write(user_status)
-
-
-    @BaseHandler.authenticated('*')
-    @inlineCallbacks
     def put(self):
-        """
-        Parameters: None
-        Request: UserUserDesc
-        Response: UserUserDesc
-        Errors: UserIdNotFound, InvalidInputFormat, InvalidAuthentication
-        """
-        request = self.validate_message(self.request.body, requests.UserUserDesc)
+        request = self.validate_message(self.request.content.read(), requests.UserUserDesc)
 
-        user_status = yield update_user_settings(self.current_user.user_id,
-                                                 request, self.request.language)
-
-        self.write(user_status)
+        return update_user_settings(self.state,
+                                    self.request.tid,
+                                    self.current_user.user_id,
+                                    request,
+                                    self.request.language)

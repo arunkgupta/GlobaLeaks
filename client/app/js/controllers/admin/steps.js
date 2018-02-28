@@ -3,7 +3,7 @@ GLClient.controller('AdminStepAddCtrl', ['$scope',
     $scope.new_step = {};
 
     $scope.add_step = function() {
-      var step = new $scope.admin.new_step($scope.questionnaire.id);
+      var step = new $scope.admin_utils.new_step($scope.questionnaire.id);
       step.label = $scope.new_step.label;
       step.presentation_order = $scope.newItemOrder($scope.questionnaire.steps, 'presentation_order');
 
@@ -14,11 +14,12 @@ GLClient.controller('AdminStepAddCtrl', ['$scope',
     };
   }
 ]).
-controller('AdminStepEditorCtrl', ['$scope', '$uibModal', 'AdminStepResource', 'AdminFieldResource',
-  function($scope, $uibModal, AdminStepResource, AdminFieldResource) {
+controller('AdminStepEditorCtrl', ['$scope', '$rootScope', '$http', 'Utils', 'AdminStepResource', 'AdminFieldResource',
+  function($scope, $rootScope, $http, Utils, AdminStepResource, AdminFieldResource) {
     $scope.editing = false;
     $scope.new_field = {};
     $scope.fields = $scope.step.children;
+    $scope.fieldResource = AdminFieldResource;
 
     $scope.toggleEditing = function () {
       $scope.editing = $scope.editing ^ 1;
@@ -26,33 +27,37 @@ controller('AdminStepEditorCtrl', ['$scope', '$uibModal', 'AdminStepResource', '
 
     $scope.save_step = function(step) {
       var updated_step = new AdminStepResource(step);
-      return $scope.update(updated_step);
+      return Utils.update(updated_step);
+    };
+
+    $scope.showAddQuestion = false;
+    $scope.toggleAddQuestion= function() {
+      $scope.showAddQuestion = !$scope.showAddQuestion;
+    };
+
+    $scope.showAddQuestionFromTemplate = false;
+    $scope.toggleAddQuestionFromTemplate = function() {
+      $scope.showAddQuestionFromTemplate = !$scope.showAddQuestionFromTemplate;
     };
 
     $scope.addField = function(field) {
-      $scope.step.children.push(field);
+      $scope.fields.push(field);
     };
 
-    $scope.delField = function(fields, field) {
-      AdminFieldResource['delete']({
-        id: field.id
-      }, function() {
-        $scope.deleteFromList(fields, field);
-      });
-    };
-
-    $scope.delAllFields = function() {
-      angular.forEach($scope.step.children, function(field) {
-        $scope.delField($scope.step.children, field);
-      });
+    $scope.delField = function(field) {
+      return Utils.deleteResource($scope.fieldResource, $scope.fields, field);
     };
 
     $scope.add_field = function() {
-      var field = $scope.admin.new_field($scope.step.id, '');
+      var field = $scope.admin_utils.new_field($scope.step.id, '');
       field.label = $scope.new_field.label;
       field.type = $scope.new_field.type;
       field.attrs = $scope.admin.get_field_attrs(field.type);
-      field.y = $scope.newItemOrder($scope.step.children, 'y');
+      field.y = $scope.newItemOrder($scope.fields, 'y');
+
+      if (field.type === 'fileupload') {
+        field.multi_entry = true;
+      }
 
       field.$save(function(new_field){
         $scope.addField(new_field);
@@ -61,32 +66,43 @@ controller('AdminStepEditorCtrl', ['$scope', '$uibModal', 'AdminStepResource', '
     };
 
     $scope.add_field_from_template = function(template_id) {
-      var field = $scope.admin.new_field_from_template(template_id, $scope.step.id, '');
-      field.y = $scope.newItemOrder($scope.step.children, 'y');
+      var field = $scope.admin_utils.new_field_from_template(template_id, $scope.step.id, '');
+      field.y = $scope.newItemOrder($scope.fields, 'y');
 
       field.$save(function(new_field) {
-        $scope.step.children.push(new_field);
+        $scope.fields.push(new_field);
       });
     };
 
-    $scope.moveUpAndSave = function(elem) {
-      $scope.moveUp(elem);
-      $scope.save_step(elem);
-    };
+    $scope.moveUp = function(e, idx) { swap(e, idx, -1); };
+    $scope.moveDown = function(e, idx) { swap(e, idx, 1); };
 
-    $scope.moveDownAndSave = function(elem) {
-      $scope.moveDown(elem);
-      $scope.save_step(elem);
-    };
+    function swap($event, index, n) {
+      $event.stopPropagation();
 
-    $scope.moveLeftAndSave = function(elem) {
-      $scope.moveLeft(elem);
-      $scope.save_step(elem);
-    };
+      var target = index + n;
+      if (target < 0 || target >= $scope.questionnaire.steps.length) {
+        return;
+      }
 
-    $scope.moveRightAndSave = function(elem) {
-      $scope.moveRight(elem);
-      $scope.save_step(elem);
-    };
+      var a = $scope.questionnaire.steps[target];
+      var b = $scope.questionnaire.steps[index];
+      $scope.questionnaire.steps[target] = b;
+      $scope.questionnaire.steps[index] = a;
+
+      $http({
+        method: 'PUT',
+        url: '/admin/steps',
+        data: {
+          'operation': 'order_elements',
+          'args': {
+            'ids': $scope.questionnaire.steps.map(function(s) { return s.id; }),
+            'questionnaire_id': $scope.questionnaire.id,
+           },
+        },
+      }).then(function() {
+        $rootScope.successes.push({});
+      });
+    }
   }
 ]);

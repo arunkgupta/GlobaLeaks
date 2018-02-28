@@ -1,43 +1,30 @@
-# -*- encoding: utf-8 -*-
-from twisted.internet.defer import inlineCallbacks, returnValue
-
-# override GLSettings
-from globaleaks import event
-from globaleaks.anomaly import Alarm
-from globaleaks.orm import transact_ro
-from globaleaks.settings import GLSettings
+# -*- coding: utf-8 -*-
+from globaleaks.jobs import anomalies
+from globaleaks.handlers import token
 from globaleaks.tests import helpers
-from globaleaks.jobs import delivery_sched
-from globaleaks.handlers import wbtip, token
-from globaleaks.handlers.admin.context import get_context_steps
-from globaleaks.handlers.admin.receiver import create_receiver
-from globaleaks.rest import errors
-from globaleaks.models import InternalTip
 from globaleaks.utils.token import Token
-from globaleaks.tests.test_anomaly import pollute_events_for_testing
+from twisted.internet.defer import inlineCallbacks
+
 
 class Test_TokenCreate(helpers.TestHandlerWithPopulatedDB):
     _handler = token.TokenCreate
 
     def assert_default_token_values(self, token):
         self.assertEqual(token['type'], u'submission')
-        self.assertEqual(token['start_validity_secs'], 0)
-        self.assertEqual(token['end_validity_secs'], 10800)
         self.assertEqual(token['remaining_uses'], Token.MAX_USES)
         self.assertEqual(token['human_captcha_answer'], 0)
-        self.assertEqual(token['graph_captcha_answer'], '')
 
     @inlineCallbacks
     def test_post(self):
-        yield Alarm.compute_activity_level()
+        yield anomalies.Anomalies().run()
 
         handler = self.request({'type': 'submission'})
 
-        yield handler.post()
+        handler.request.client_using_tor = True
 
-        token = self.responses[0]
+        response = yield handler.post()
 
-        self.assert_default_token_values(token)
+        self.assert_default_token_values(response)
 
 
 class Test_TokenInstance(helpers.TestHandlerWithPopulatedDB):
@@ -45,42 +32,46 @@ class Test_TokenInstance(helpers.TestHandlerWithPopulatedDB):
 
     @inlineCallbacks
     def test_put_right_answer(self):
-        pollute_events_for_testing()
-        yield Alarm.compute_activity_level()
+        self.pollute_events()
+        yield anomalies.Anomalies().run()
 
-        token = Token('submission')
-
-        token.human_captcha = {'question': 'XXX','answer': 1}
-        token.proof_of_work = False
+        token = Token(1, 'submission')
+        token.human_captcha = {'question': 'XXX','answer': 1, 'solved': False}
+        token.proof_of_work['solved'] = True
 
         request_payload = token.serialize()
-
         request_payload['human_captcha_answer'] = 1
 
         handler = self.request(request_payload)
-        yield handler.put(token.id)
 
-        self.assertEqual(self.responses[0]['human_captcha'], False)
+        response = yield handler.put(token.id)
+
+        token.use()
+
+        self.assertFalse(response['human_captcha'])
+        self.assertTrue(token.human_captcha['solved'])
 
     @inlineCallbacks
     def test_put_wrong_answer(self):
-        pollute_events_for_testing()
-        yield Alarm.compute_activity_level()
+        self.pollute_events()
+        yield anomalies.Anomalies().run()
 
-        token = Token('submission')
+        token = Token(1, 'submission')
 
-        token.human_captcha = {'question': 'XXX','answer': 1}
-        token.proof_of_work = False
+        orig_question = u'77+33'
+        token.human_captcha = {'question': orig_question,'answer': 1, 'solved': False}
 
         request_payload = token.serialize()
 
-        request_payload['human_captcha_answer'] = 2
+        request_payload['human_captcha_answer'] = 883
 
         handler = self.request(request_payload)
-        yield handler.put(token.id)
+        new_token = yield handler.put(token.id)
 
-        self.assertNotEqual(self.responses[0]['human_captcha'], False)
+        self.assertFalse(token.human_captcha['solved'])
 
-        # verify that the question is changed
-        self.assertNotEqual(self.responses[0]['human_captcha'], 'XXX')
+        self.assertEqual(new_token['human_captcha'], token.human_captcha['question'])
+        self.assertNotEqual(new_token['human_captcha'], orig_question)
 
+        self.assertIsNot(new_token['human_captcha'], False)
+        self.assertNotIn('human_captcha_anwser', new_token)

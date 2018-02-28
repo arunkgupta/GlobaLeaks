@@ -1,5 +1,5 @@
-GLClient.controller('StatisticsCtrl', ['$scope', '$filter', 'Node', 'StatsCollection',
-  function($scope, $filter, Node, StatsCollection) {
+GLClient.controller('StatisticsCtrl', ['$scope', '$filter', 'StatsCollection',
+  function($scope, $filter, StatsCollection) {
     $scope.week_delta = 0;
     $scope.blob = {};
 
@@ -59,7 +59,7 @@ GLClient.controller('StatisticsCtrl', ['$scope', '$filter', 'Node', 'StatsCollec
           }
       });
 
-      var colorScale = d3.scale.quantile()
+      var colorScale = d3.scaleQuantile()
           .domain([0, buckets - 1, d3.max(data, function (d) { return d.value; })])
           .range(colors);
 
@@ -196,16 +196,4 @@ GLClient.controller('StatisticsCtrl', ['$scope', '$filter', 'Node', 'StatsCollec
     };
 
     $scope.update_week();
-
-}]).
-controller('AnomaliesCtrl', ['$scope', 'AnomaliesCollection',
-  function($scope, AnomaliesCollection) {
-
-    $scope.showLevel = true;
-    $scope.anomalies = AnomaliesCollection.query();
-}]).
-controller('ActivitiesCtrl', ['$scope', 'ActivitiesCollection',
-  function($scope, ActivitiesCollection) {
-
-    $scope.activities = ActivitiesCollection.query();
 }]);

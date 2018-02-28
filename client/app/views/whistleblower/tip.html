@@ -1,10 +1,10 @@
-<div class="row" data-ng-if="tip.status_page_message !== ''">
+<div class="row" data-ng-if="tip.context.status_page_message !== ''">
   <div class="col-md-12">
-    <span id="StatusPageMessage">{{tip.status_page_message}}</span>
+    <span id="StatusPageMessage">{{tip.context.status_page_message}}</span>
   </div>
 </div>
 
-<div class="row" data-ng-if="!node.disable_encryption_warning && tip_unencrypted">
+<div class="row" data-ng-if="!node.disable_encryption_warnings && tip_unencrypted">
   <div class="col-md-12">
     <div class="alert alert-warning">
       <i class="glyphicon glyphicon-warning-sign"></i>
@@ -18,10 +18,9 @@
 <div class="row">
   <div class="col-md-12">
     <div data-ng-include="'views/partials/tip_info.html'"></div>
-    <div data-ng-if="tip.show_recipients_details" data-ng-include="'views/partials/tip_receiver_list.html'"></div>
+    <div data-ng-if="tip.context.show_recipients_details" data-ng-include="'views/partials/tip_receiver_list.html'"></div>
   </div>
 </div>
-
 <div class="row">
   <div class="col-md-6">
     <div data-ng-include="'views/partials/tip_questionnaire_answers.html'"></div>
@@ -29,19 +28,22 @@
   <div class="col-md-6" data-ng-if="tip.enable_whistleblower_identity">
     <div data-ng-include="'views/whistleblower/whistleblower_identity.html'"></div>
   </div>
+  <div class="col-md-6" data-ng-if="showWBFileWidget()">
+    <div data-ng-include="'views/partials/widget_wbfiles.html'"></div>
+  </div>
 </div>
 
-<div class="row">
+<div class="row" data-ng-if="tip.enable_attachments">
   <div class="col-md-12">
     <div data-ng-include="'views/partials/tip_files_whistleblower.html'"></div>
   </div>
 </div>
 
 <div class="row">
-  <div class="col-md-6" data-ng-if="tip.enable_comments">
+  <div class="col-md-6" data-ng-if="tip.context.enable_comments">
     <div data-ng-include="'views/partials/tip_comments.html'"></div>
   </div>
-  <div class="col-md-6" data-ng-if="tip.enable_messages">
+  <div class="col-md-6" data-ng-if="tip.context.enable_messages">
     <div data-ng-include="'views/partials/tip_messages.html'"></div>
   </div>
 </div>

@@ -1,15 +1,13 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #
 #   shorturl
 #   *****
 # Implementation of the URL shortener handlers
 #
-from twisted.internet.defer import inlineCallbacks
-
 from globaleaks import models
 from globaleaks.handlers.base import BaseHandler
 from globaleaks.orm import transact
-from globaleaks.rest import requests, errors
+from globaleaks.rest import requests
 
 
 def serialize_shorturl(shorturl):
@@ -21,61 +19,43 @@ def serialize_shorturl(shorturl):
 
 
 @transact
-def get_shorturl_list(store):
-    shorturls = store.find(models.ShortURL)
-    return [serialize_shorturl(shorturl) for shorturl in shorturls]
+def get_shorturl_list(session, tid):
+    return [serialize_shorturl(shorturl) for shorturl in session.query(models.ShortURL).filter(models.ShortURL.tid == tid)]
 
 
 @transact
-def create_shorturl(store, request):
-    shorturl = models.ShortURL(request)
-    store.add(shorturl)
+def create_shorturl(session, tid, request):
+    request['tid'] = tid
+    request['shorturl'] = '/u/' + request['shorturl']
+    shorturl = models.db_forge_obj(session, models.ShortURL, request)
     return serialize_shorturl(shorturl)
 
 
-@transact
-def delete_shorturl(store, shorturl_id):
-    shorturl = store.find(models.ShortURL, models.ShortURL.id == shorturl_id).one()
-    if not shorturl:
-        raise errors.ShortURLIdNotFound
-
-    store.remove(shorturl)
-
-
-
 class ShortURLCollection(BaseHandler):
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
+    check_roles = 'admin'
+    cache_resource = True
+    invalidate_cache = True
+
     def get(self):
         """
         Return the list of registered short urls
         """
-        response = yield get_shorturl_list()
+        return get_shorturl_list(self.request.tid)
 
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def post(self):
         """
         Create a new shorturl
         """
-        request = self.validate_message(self.request.body, requests.AdminShortURLDesc)
+        request = self.validate_message(self.request.content.read(), requests.AdminShortURLDesc)
 
-        response = yield create_shorturl(request)
-
-        self.set_status(201) # Created
-        self.write(response)
+        return create_shorturl(self.request.tid, request)
 
 
 class ShortURLInstance(BaseHandler):
-    @inlineCallbacks
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
+    check_roles = 'admin'
+
     def delete(self, shorturl_id):
         """
         Delete the specified shorturl.
         """
-        yield delete_shorturl(shorturl_id)
+        return models.delete(models.ShortURL, models.ShortURL.tid == self.request.tid, models.ShortURL.id == shorturl_id)

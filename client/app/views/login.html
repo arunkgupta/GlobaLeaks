@@ -7,19 +7,19 @@
 </div>
 <div class="row">
   <div class="col-md-4">
-    <form name="loginForm" novalidate>
+    <form name="loginForm" autocomplete="off" novalidate >
       <div data-ng-if="::!simplifiedLogin">
         <div class="form-group">
           <label data-translate>Username</label>
-          <input class="form-control" name="username" data-ng-model="loginUsername" type="text" autocomplete="off" required />
+          <input class="form-control" name="username" data-ng-model="loginUsername" type="text" required />
         </div>
 
         <div class="form-group">
           <label data-translate>Password</label>
-          <input class="form-control" name="password" data-ng-model="loginPassword" type="password" autocomplete="off" required />
+          <input class="form-control" name="password" data-ng-model="loginPassword" type="password" required />
         </div>
 
-        <button class="btn btn-success" data-ng-disabled="loginInProgress || loginForm.$invalid" data-ng-click="login(loginUsername, loginPassword)" type="submit">
+        <button id="login-button" class="btn btn-success" data-ng-disabled="Authentication.loginInProgress || loginForm.$invalid" data-ng-click="Authentication.login(loginUsername, loginPassword)" type="submit">
           <i class="glyphicon glyphicon-log-in"></i>
           <span data-translate>Log in</span>
         </button>
@@ -27,7 +27,7 @@
       <div data-ng-if="::simplifiedLogin">
         <div class="form-group">
           <label data-translate>Please select your account:</label>
-          <select class="form-control" data-ng-model="loginUsername" data-ng-options="item.username as item.name for item in receivers | filter:filterReceivers | orderBy:'name'" required></select>
+          <select class="form-control" data-ng-model="loginUsername" data-ng-options="item.username as item.name for item in receivers | orderBy:'name'" required></select>
         </div>
 
         <div class="form-group" data-ng-show="loginUsername">
@@ -36,7 +36,7 @@
         </div>
 
         <div class="form-group" data-ng-show="loginUsername">
-          <button class="btn btn-success" data-ng-disabled="loginInProgress || loginForm.$invalid" data-ng-click="login(loginUsername, loginPassword)" type="submit">
+          <button id="login-button" class="btn btn-success" data-ng-disabled="Authentication.loginInProgress || loginForm.$invalid" data-ng-click="Authentication.login(loginUsername, loginPassword)" type="submit">
             <i class="glyphicon glyphicon-log-in"></i>
             <span data-translate>Log in</span>
           </button>

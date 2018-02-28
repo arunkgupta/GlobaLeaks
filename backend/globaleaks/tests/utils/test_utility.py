@@ -1,12 +1,29 @@
-import time
-
+# -*- coding: utf-8 -*-
+import StringIO
 import re
-from twisted.trial import unittest
+import sys
+from datetime import datetime
+
 from globaleaks.utils import utility
-from globaleaks.settings import GLSettings
+from twisted.python import log as twlog
+from twisted.python.failure import Failure
+from twisted.trial import unittest
 
 
 class TestUtility(unittest.TestCase):
+    def test_msdos_encode(self):
+        strs = [
+            ('This is \n news', 'This is \r\n news'),
+            ('No\r\nreplace', 'No\r\nreplace'),
+            ('No\r\n\nreplace', 'No\r\n\r\nreplace'),
+            ('No', 'No'),
+            ('\nNo\n\n', '\r\nNo\r\n\r\n'),
+            ('\r\nNo\n\n', '\r\nNo\r\n\r\n'),
+        ]
+
+        for (i, o) in strs:
+            self.assertEqual(utility.msdos_encode(i), o)
+
     def test_log_encode_html_str(self):
         self.assertEqual(utility.log_encode_html("<"), '&lt;')
         self.assertEqual(utility.log_encode_html(">"), '&gt;')
@@ -38,71 +55,19 @@ class TestUtility(unittest.TestCase):
         self.assertIsNotNone(re.match(r'([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})',
                                       utility.uuid4()))
 
-    def test_randint(self):
-        self.assertEqual(utility.randint(0), 0)
-        self.assertEqual(utility.randint(0, 0), 0)
-        self.assertEqual(utility.randint(9, 9), 9)
+    def test_datetime_null(self):
+        self.assertEqual(utility.datetime_null(), datetime.utcfromtimestamp(0))
 
-        number = self.assertTrue(utility.randint(1, 2))
-        self.assertTrue(0 < number < 3)
-
-    def test_randbits(self):
-        self.assertEqual(len(utility.randbits(4)), 0)
-        self.assertEqual(len(utility.randbits(8)), 1)
-        self.assertEqual(len(utility.randbits(9)), 1)
-        self.assertEqual(len(utility.randbits(16)), 2)
-
-    def test_choice(self):
-        population = [0, 1, 2, 3, 4, 5]
-        self.assertTrue(utility.choice(population) in population)
-
-    def test_shuffle(self):
-        ordered = [0, 1, 2, 3, 4, 5]
-        shuffle = utility.shuffle(ordered)
-        self.assertEqual(len(ordered), len(shuffle))
-        for i in ordered:
-            self.assertTrue(i in shuffle)
-
-    def test_utc_dynamic_date(self):
-        a = utility.utc_dynamic_date(utility.datetime_null())
-        b = utility.utc_dynamic_date(utility.datetime_null(), seconds=0, minutes=0, hours=0)
-        self.assertTrue(a == b)
-
-        c = utility.utc_dynamic_date(utility.datetime_null(), seconds=121, minutes=120, hours=0)
-        d = utility.utc_dynamic_date(utility.datetime_null(), seconds=61, minutes=61, hours=1)
-        e = utility.utc_dynamic_date(utility.datetime_null(), seconds=1, minutes=2, hours=2)
-        self.assertEqual(c, d)
-        self.assertEqual(d, e)
-
-        f = utility.utc_dynamic_date(c, seconds=121, minutes=120, hours=0)
-        g = utility.utc_dynamic_date(d, seconds=61, minutes=61, hours=1)
-        h = utility.utc_dynamic_date(e, seconds=1, minutes=2, hours=2)
-        self.assertEqual(c, d)
-        self.assertEqual(d, e)
-
-    def test_utc_past_date(self):
-        a = utility.datetime_now()
-        b = utility.utc_past_date(seconds=99)
-        c = utility.utc_past_date(minutes=99)
-        d = utility.utc_past_date(hours=99)
-        self.assertTrue(a > b)
-        self.assertTrue(b > c)
-        self.assertTrue(c > d)
-
-    def test_utc_future_date(self):
-        a = utility.datetime_now()
-        b = utility.utc_future_date(seconds=99)
-        c = utility.utc_future_date(minutes=99)
-        d = utility.utc_future_date(hours=99)
-        self.assertTrue(a < b)
-        self.assertTrue(b < c)
-        self.assertTrue(c < d)
+    def test_get_expiration(self):
+        date = utility.get_expiration(15)
+        self.assertEqual(date.hour, 00)
+        self.assertEqual(date.minute, 00)
+        self.assertEqual(date.second, 00)
 
     def test_is_expired(self):
-        self.assertFalse(utility.is_expired(None))
         self.assertTrue(utility.is_expired(utility.datetime_null()))
         self.assertTrue(utility.is_expired(utility.datetime_now()))
-        self.assertFalse(utility.is_expired(utility.utc_future_date(seconds=1337)))
+        self.assertFalse(utility.is_expired(utility.datetime_never()))
 
     def test_datetime_to_ISO8601_to_datetime_to_dot_dot_dot(self):
         a = utility.datetime_null()
@@ -113,7 +78,6 @@ class TestUtility(unittest.TestCase):
         self.assertTrue(b, d)
 
     def test_datetime_to_pretty_str(self):
-        self.assertEqual(utility.datetime_to_pretty_str(None), 'Thursday 01 January 1970 00:00 (UTC)')
         self.assertEqual(utility.datetime_to_pretty_str(utility.datetime_null()),
                         'Thursday 01 January 1970 00:00 (UTC)')
 
@@ -134,13 +98,41 @@ class TestUtility(unittest.TestCase):
         self.assertEqual(utility.bytes_to_pretty_str("1001"), "1KB")
 
     def test_log(self):
-        utility.log.info("info")
         utility.log.err("err")
+        utility.log.info("info")
         utility.log.debug("debug")
-        utility.log.msg("msg")
 
-    def test_caller_name(self):
-        def abcdef():
-            return utility.caller_name()
 
-        self.assertEqual(abcdef(), 'globaleaks.tests.utils.test_utility.TestUtility.test_caller_name')
+class TestLogging(unittest.TestCase):
+    def setUp(self):
+        fake_std_out = StringIO.StringIO()
+        self._stdout, sys.stdout = sys.stdout, fake_std_out
+
+    def tearDown(self):
+        sys.stdout = self._stdout
+
+    def test_log_emission(self):
+        output_buff = StringIO.StringIO()
+
+        observer = utility.GLLogObserver(output_buff)
+        observer.start()
+
+        # Manually emit logs
+        e1 = {'time': 100000, 'message': 'x', 'system': 'ut'}
+        observer.emit(e1)
+
+        f = Failure(IOError('This is a mock failure'))
+        e2 = {'time': 100001, 'message': 'x', 'system': 'ut', 'failure': f}
+        observer.emit(e2)
+
+        twlog.err("error")
+
+        # Emit logs through twisted's interface. Import is required now b/c of stdout hack
+        observer.stop()
+
+        s = output_buff.getvalue()
+        # A bit of a mess, but this is the format we are expecting.
+        gex = r".+ \[ut\] x\n"
+        m = re.findall(gex, s)
+        self.assertTrue(len(m) == 2)
+        self.assertTrue(s.endswith("[-] &#39;error&#39;\n"))

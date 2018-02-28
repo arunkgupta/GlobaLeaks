@@ -1,421 +1,298 @@
-# -*- coding: UTF-8
+# -*- coding: utf-8
 #
 #   /admin/fields
 #   *****
 # Implementation of the code executed on handler /admin/fields
 #
-import copy
-
-from storm.expr import And, Not, In
-
-from twisted.internet.defer import inlineCallbacks
+from sqlalchemy.sql.expression import not_
 
 from globaleaks import models
-from globaleaks.orm import transact, transact_ro
 from globaleaks.handlers.base import BaseHandler
-from globaleaks.handlers.node import serialize_field
+from globaleaks.handlers.public import serialize_field
+from globaleaks.orm import transact
 from globaleaks.rest import errors, requests
-from globaleaks.rest.apicache import GLApiCache
+from globaleaks.settings import Settings
 from globaleaks.utils.structures import fill_localized_keys
-from globaleaks.utils.utility import log
+from globaleaks.utils.utility import read_json_file
 
 
-def associate_field(store, field, template=None, step=None, fieldgroup=None):
-    """
-    Associate a field to a specified step or fieldgroup
-
-    :param store: the store on which perform queries
-    :param field: the field to be associated
-    :param template: the template to which bind the field
-    :param step: the step to which associate the field
-    :param fieldgroup: the fieldgroup to which associate the field
-    """
-    if template:
-        if field.instance != 'reference':
-             raise errors.InvalidInputFormat("Only fields of kind reference can be binded to a template")
-
-        field.template_id = template.id
-
-    if step:
-        if field.instance == 'template':
-            raise errors.InvalidInputFormat("Cannot associate a field template to a step")
-
-        step.children.add(field)
-
-    if fieldgroup:
-        if field.instance == 'template' and fieldgroup.instance != 'template':
-            raise errors.InvalidInputFormat("Cannot associate field template to a field")
-
-        ancestors = set(fieldtree_ancestors(store, fieldgroup.id))
-
-        if field.id == fieldgroup.id or field.id in ancestors:
-            raise errors.InvalidInputFormat("Provided field association would cause recursion loop")
-
-        fieldgroup.children.add(field)
+def db_add_field_attrs(session, field_id, field_attrs):
+    for attr_name, attr_dict in field_attrs.items():
+        x = session.query(models.FieldAttr) \
+                   .filter(models.FieldAttr.field_id == field_id,
+                           models.FieldAttr.name == attr_name).one_or_none()
+        if x is None:
+            attr_dict['name'] = attr_name
+            attr_dict['field_id'] = field_id
+            models.db_forge_obj(session, models.FieldAttr, attr_dict)
 
 
-def disassociate_field(field):
-    """
-    Disassociate a field from the eventually associated step or fieldgroup
+def db_update_fieldoption(session, tid, field_id, fieldoption_id, option_dict, language, idx):
+    option_dict['tid'] = tid
+    option_dict['field_id'] = field_id
 
-    :param store: the store on which perform queries.
-    :param field: the field to be deassociated.
-    """
-    field.step = None
-    field.fieldgroup = None
+    fill_localized_keys(option_dict, models.FieldOption.localized_keys, language)
 
-
-def db_import_fields(store, step, fieldgroup, fields):
-    for field in fields:
-        f_attrs = copy.deepcopy(field['attrs'])
-        f_options = copy.deepcopy(field['options'])
-        f_children = copy.deepcopy(field['children'])
-
-        del field['attrs'], field['options'], field['children']
-
-        f = models.db_forge_obj(store, models.Field, field)
-
-        for attr in f_attrs:
-            f_attrs[attr]['name'] = attr
-            f.attrs.add(models.db_forge_obj(store, models.FieldAttr, f_attrs[attr]))
-
-        for option in f_options:
-            f.options.add(models.db_forge_obj(store, models.FieldOption, option))
-
-        if (step):
-            step.children.add(f)
-        else:
-            fieldgroup.children.add(f)
-
-        if f_children:
-            db_import_fields(store, None, f, f_children)
-
-
-def db_update_fieldoption(store, fieldoption_id, option, language):
-    fill_localized_keys(option, models.FieldOption.localized_keys, language)
-
+    o = None
     if fieldoption_id is not None:
-        o = store.find(models.FieldOption, models.FieldOption.id == fieldoption_id).one()
-    else:
-        o = None
+        o = session.query(models.FieldOption).filter(models.FieldOption.id == fieldoption_id,
+                                                     models.FieldOption.field_id == models.Field.id,
+                                                     models.Field.tid == tid).one_or_none()
 
     if o is None:
-        o = models.FieldOption()
-        store.add(o)
+        o = models.db_forge_obj(session, models.FieldOption, option_dict)
+    else:
+        o.update(option_dict)
 
-    o.trigger_field = option['trigger_field'] if option['trigger_field'] != '' else None
-    o.trigger_step = option['trigger_step'] if option['trigger_step'] != '' else None
-
-    o.update(option)
+    o.presentation_order = idx
 
     return o.id
 
 
-def db_update_fieldoptions(store, field_id, options, language):
+def db_update_fieldoptions(session, tid, field_id, options, language):
     """
     Update options
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param field_id: the field_id on wich bind the provided options
     :param language: the language of the option definition dict
     """
-    options_ids = []
+    options_ids = [db_update_fieldoption(session, tid, field_id, option['id'], option, language, idx) for idx, option in enumerate(options)]
 
-    for option in options:
-        option['field_id'] = field_id
-        options_ids.append(db_update_fieldoption(store, option['id'], option, language))
+    if options_ids:
+        ids = [x[0] for x in session.query(models.FieldOption.id).filter(models.FieldOption.field_id == field_id,
+                                                                         not_(models.FieldOption.id.in_(options_ids)),
+                                                                         models.FieldOption.field_id == models.Field.id,
+                                                                         models.Field.tid == tid)]
+        if ids:
+            session.query(models.FieldOption).filter(models.FieldOption.id.in_(ids)).delete(synchronize_session='fetch')
 
-    store.find(models.FieldOption, And(models.FieldOption.field_id == field_id, Not(In(models.FieldOption.id, options_ids)))).remove()
 
-
-def db_update_fieldattr(store, field_id, attr_name, attr_dict, language):
-    attr = store.find(models.FieldAttr, And(models.FieldAttr.field_id == field_id, models.FieldAttr.name == attr_name)).one()
-    if not attr:
-        attr = models.FieldAttr()
-
+def db_update_fieldattr(session, tid, field_id, attr_name, attr_dict, language):
     attr_dict['name'] = attr_name
     attr_dict['field_id'] = field_id
+    attr_dict['tid'] = tid
 
     if attr_dict['type'] == 'bool':
-        attr_dict['value'] = 'True' if attr_dict['value'] == True else 'False'
+        attr_dict['value'] = 'True' if attr_dict['value'] else 'False'
     elif attr_dict['type'] == u'localized':
         fill_localized_keys(attr_dict, ['value'], language)
 
-    attr.update(attr_dict)
+    a = session.query(models.FieldAttr).filter(models.FieldAttr.field_id == field_id, models.FieldAttr.name == attr_name, models.FieldAttr.field_id == models.Field.id, models.Field.tid == tid).one_or_none()
+    if a is None:
+        a = models.db_forge_obj(session, models.FieldAttr, attr_dict)
+    else:
+        a.update(attr_dict)
 
-    store.add(attr)
-
-    return attr.id
-
-
-def db_update_fieldattrs(store, field_id, field_attrs, language):
-    attrs_ids = [db_update_fieldattr(store, field_id, attr_name, attr, language) for attr_name, attr in field_attrs.iteritems()]
-
-    store.find(models.FieldAttr, And(models.FieldAttr.field_id == field_id, Not(In(models.FieldAttr.id, attrs_ids)))).remove()
+    return a.id
 
 
-def field_integrity_check(store, field):
+def db_update_fieldattrs(session, tid, field_id, field_attrs, language):
+    attrs_ids = [db_update_fieldattr(session, tid, field_id, attr_name, attr, language) for attr_name, attr in field_attrs.items()]
+
+    if attrs_ids:
+        ids = [x[0] for x in session.query(models.FieldAttr.id).filter(models.FieldAttr.field_id == field_id,
+                                                                       not_(models.FieldAttr.id.in_(attrs_ids)),
+                                                                       models.FieldAttr.field_id == models.Field.id,
+                                                                       models.Field.tid == tid)]
+
+        if ids:
+            session.query(models.FieldAttr).filter(models.FieldAttr.id.in_(ids)).delete(synchronize_session='fetch')
+
+
+def check_field_association(session, tid, field_dict):
+    if field_dict.get('fieldgroup_id', '') and session.query(models.Field).filter(models.Field.id == field_dict['fieldgroup_id'],
+                                                                                  models.Field.tid != tid).count():
+        raise errors.InputValidationError()
+
+    if field_dict.get('template_id', '') and session.query(models.Field).filter(models.Field.id == field_dict['template_id'],
+                                                                                not_(models.Field.tid.in_(set([1, tid])))).count():
+        raise errors.InputValidationError()
+
+    if field_dict.get('step_id', '') and session.query(models.Field).filter(models.Step.id == field_dict['step_id'],
+                                                                            models.Questionnaire.id == models.Step.questionnaire_id,
+                                                                            not_(models.Questionnaire.tid.in_(set([1, tid])))).count():
+        raise errors.InputValidationError()
+
+    if field_dict.get('fieldgroup_id', ''):
+        ancestors = set(fieldtree_ancestors(session, field_dict['fieldgroup_id']))
+        if field_dict['id'] == field_dict['fieldgroup_id'] or field_dict['id'] in ancestors:
+            raise errors.InputValidationError("Provided field association would cause recursion loop")
+
+
+def db_create_field(session, tid, field_dict, language):
     """
-    Preliminar validations of field descriptor in relation to:
-    - step_id
-    - fieldgroup_id
-      template_id
-    - instance type
+    Create and add a new field to the session, then return the new serialized object.
 
-    :param field: the field dict to be validated
-    """
-    template = None
-    step = None
-    fieldgroup = None
-
-    if field['instance'] != 'template' and (field['step_id'] == '' and field['fieldgroup_id'] == ''):
-        raise errors.InvalidInputFormat("Each field should be a template or be associated to a step/fieldgroup")
-
-    if field['instance'] != 'template' and (field['step_id'] != '' and field['fieldgroup_id'] != ''):
-        raise errors.InvalidInputFormat("Cannot associate a field to both a step and a fieldgroup")
-
-    if field['template_id'] != '':
-        template = store.find(models.Field, models.Field.id == field['template_id']).one()
-        if not template:
-            raise errors.FieldIdNotFound
-
-    if field['step_id'] != '':
-        step = store.find(models.Step, models.Step.id == field['step_id']).one()
-        if not step:
-            raise errors.StepIdNotFound
-
-    if field['fieldgroup_id'] != '':
-        fieldgroup = store.find(models.Field, models.Field.id == field['fieldgroup_id']).one()
-        if not fieldgroup:
-            raise errors.FieldIdNotFound
-
-    return field['instance'], template, step, fieldgroup
-
-
-def db_create_field(store, field_dict, language):
-    """
-    Create and add a new field to the store, then return the new serialized object.
-
-    :param store: the store on which perform queries.
-    :param field: the field definition dict
+    :param session: the session on which perform queries.
+    :param field_dict: the field definition dict
     :param language: the language of the field definition dict
     :return: a serialization of the object
     """
-    _, template, step, fieldgroup = field_integrity_check(store, field_dict)
+    field_dict['tid'] = tid
 
     fill_localized_keys(field_dict, models.Field.localized_keys, language)
 
-    field = models.Field.new(store, field_dict)
+    check_field_association(session, tid, field_dict)
 
-    associate_field(store, field, template, step, fieldgroup)
+    field = models.db_forge_obj(session, models.Field, field_dict)
 
-    if field.template:
+    if field.template_id is not None:
         # special handling of the whistleblower_identity field
-        if field.template.key == 'whistleblower_identity':
-            if field.step:
-                if not field.step.questionnaire.enable_whistleblower_identity:
-                    field.step.questionnaire.enable_whistleblower_identity = True
+        if field.template_id == 'whistleblower_identity':
+            field_attrs = read_json_file(Settings.field_attrs_file)
+            attrs = field_attrs.get(field.template_id, {})
+            db_add_field_attrs(session, field.id, attrs)
+
+            if field.step_id is not None:
+                questionnaire = session.query(models.Questionnaire) \
+                                       .filter(models.Field.id == field.id,
+                                               models.Field.step_id == models.Step.id,
+                                               models.Step.questionnaire_id == models.Questionnaire.id,
+                                               models.Questionnaire.tid == tid).one()
+
+                if questionnaire.enable_whistleblower_identity is False:
+                    questionnaire.enable_whistleblower_identity = True
                 else:
-                    raise errors.InvalidInputFormat("Whistleblower identity field already present")
+                    raise errors.InputValidationError("Whistleblower identity field already present")
             else:
-                raise errors.InvalidInputFormat("Cannot associate whistleblower identity field to a fieldgroup")
+                raise errors.InputValidationError("Cannot associate whistleblower identity field to a fieldgroup")
 
     else:
-        db_update_fieldattrs(store, field.id, field_dict['attrs'], language)
-        db_update_fieldoptions(store, field.id, field_dict['options'], language)
+        attrs = field_dict.get('attrs', [])
+        options = field_dict.get('options', [])
 
-    for c in field_dict['children']:
-        c['fieldgroup_id'] = field.id
-        db_create_field(store, c, language)
+        db_update_fieldattrs(session, tid, field.id, attrs, language)
+        db_update_fieldoptions(session, tid, field.id, options, language)
+
+    if field.instance != 'reference':
+        for c in field_dict.get('children', []):
+            c['tid'] = field.tid
+            c['fieldgroup_id'] = field.id
+            db_create_field(session, tid, c, language)
 
     return field
 
 
 @transact
-def create_field(store, field_dict, language, request_type=None):
+def create_field(session, tid, field_dict, language):
     """
     Transaction that perform db_create_field
     """
-    field = db_create_field(store, field_dict, language if request_type != 'import' else None)
+    field = db_create_field(session, tid, field_dict, language)
 
-    return serialize_field(store, field, language)
+    return serialize_field(session, tid, field, language)
 
 
-def db_update_field(store, field_id, field_dict, language):
-    field = models.Field.get(store, field_id)
-    if not field:
-        raise errors.FieldIdNotFound
+def db_update_field(session, tid, field_id, field_dict, language):
+    field = models.db_get(session, models.Field, models.Field.tid == tid, models.Field.id == field_id)
 
-    # To be uncommented upon completion of fields implementaion
-    # if not field.editable:
-    #     raise errors.FieldNotEditable
+    check_field_association(session, tid, field_dict)
 
-    _, template, step, fieldgroup = field_integrity_check(store, field_dict)
+    db_update_fieldattrs(session, tid, field.id, field_dict['attrs'], language)
 
-    try:
-        # make not possible to change field type
-        field_dict['type'] = field.type
+    # make not possible to change field type
+    field_dict['type'] = field.type
+    if field_dict['instance'] != 'reference':
+        fill_localized_keys(field_dict, models.Field.localized_keys, language)
 
-        if field_dict['instance'] != 'reference':
-            fill_localized_keys(field_dict, models.Field.localized_keys, language)
+        db_update_fieldoptions(session, tid, field.id, field_dict['options'], language)
 
-            # children handling:
-            #  - old children are cleared
-            #  - new provided childrens are evaluated and added
-            children = field_dict['children']
-            if len(children) and field.type != 'fieldgroup':
-                raise errors.InvalidInputFormat("children can be associated only to fields of type fieldgroup")
+        # full update
+        field.update(field_dict)
 
-            ancestors = set(fieldtree_ancestors(store, field.id))
-
-            field.children.clear()
-            for child in children:
-                if child['id'] == field.id or child['id'] in ancestors:
-                    raise errors.FieldIdNotFound
-
-                c = db_update_field(store, child['id'], child, language)
-
-                # remove current step/field fieldgroup/field association
-                disassociate_field(c)
-
-                field.children.add(c)
-
-            db_update_fieldattrs(store, field.id, field_dict['attrs'], language)
-            db_update_fieldoptions(store, field.id, field_dict['options'], language)
-
-            # full update
-            field.update(field_dict)
-
-        else:
-            # partial update
-            partial_update = {
-              'x': field_dict['x'],
-              'y': field_dict['y'],
-              'width': field_dict['width'],
-              'multi_entry': field_dict['multi_entry']
-            }
-
-            field.update(partial_update)
-
-        # remove current step/field fieldgroup/field association
-        disassociate_field(field)
-
-        associate_field(store, field, template, step, fieldgroup)
-    except Exception as dberror:
-        log.err('Unable to update field: {e}'.format(e=dberror))
-        raise errors.InvalidInputFormat(dberror)
+    else:
+        # partial update
+        field.update({
+          'x': field_dict['x'],
+          'y': field_dict['y'],
+          'width': field_dict['width'],
+          'multi_entry': field_dict['multi_entry']
+        })
 
     return field
 
 
 @transact
-def update_field(store, field_id, field, language, request_type=None):
+def update_field(session, tid, field_id, field, language):
     """
     Update the specified field with the details.
-    raises :class:`globaleaks.errors.FieldIdNotFound` if the field does
-    not exist.
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param field_id: the field_id of the field to update
     :param field: the field definition dict
     :param language: the language of the field definition dict
     :return: a serialization of the object
     """
-    field = db_update_field(store, field_id, field, language if request_type != 'import' else None)
+    field = db_update_field(session, tid, field_id, field, language)
 
-    return serialize_field(store, field, language)
-
-
-@transact_ro
-def get_field(store, field_id, language, request_type=None):
-    """
-    Serialize a specified field
-
-    :param store: the store on which perform queries.
-    :param field_id: the id corresponding to the field.
-    :param language: the language in which to localize data
-    :return: the currently configured field.
-    :rtype: dict
-    """
-    field = store.find(models.Field, models.Field.id == field_id).one()
-    if not field:
-        raise errors.FieldIdNotFound
-
-    return serialize_field(store, field, language if request_type != 'export' else None)
+    return serialize_field(session, tid, field, language)
 
 
 @transact
-def delete_field(store, field_id):
+def delete_field(session, tid, field_id):
     """
     Delete the field object corresponding to field_id
 
     If the field has children, remove them as well.
     If the field is immediately attached to a step object, remove it as well.
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param field_id: the id corresponding to the field.
-    :raises FieldIdNotFound: if no such field is found.
     """
-    field = store.find(models.Field, models.Field.id == field_id).one()
-    if not field:
-        raise errors.FieldIdNotFound
+    field = models.db_get(session, models.Field, models.Field.tid == tid, models.Field.id == field_id)
 
-    # TODO: to be uncommented upon completion of fields implementaion
-    # if not field.editable:
-    #     raise errors.FieldNotEditable
+    if not field.editable:
+        raise errors.ForbiddenOperation
 
-    if field.instance == 'template':
-        if store.find(models.Field, models.Field.template_id == field.id).count():
-            raise errors.InvalidInputFormat("Cannot remove the field template as it is used by one or more questionnaires")
+    if field.instance == 'template' and session.query(models.Field).filter(models.Field.tid == tid, models.Field.template_id == field.id).count():
+        raise errors.InputValidationError("Cannot remove the field template as it is used by one or more questionnaires")
 
+    if field.template_id == 'whistleblower_identity' and field.step_id is not None:
+        session.query(models.Questionnaire) \
+             .filter(models.Questionnaire.tid == tid,
+                     models.Step.id == field.step_id,
+                     models.Questionnaire.id == models.Step.questionnaire_id).set(enable_whistleblower_identity = False)
 
-    if field.template:
-        # special handling of the whistleblower_identity field
-        if field.template.key == 'whistleblower_identity':
-            if field.step is not None:
-                field.step.questionnaire.enable_whistleblower_identity = False
-
-    store.remove(field)
+    session.delete(field)
 
 
-def fieldtree_ancestors(store, field_id):
+def fieldtree_ancestors(session, id):
     """
     Given a field_id, recursively extract its parents.
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param field_id: the parent id.
     :return: a generator of Field.id
     """
-    field = store.find(models.Field, models.Field.id == field_id).one()
+    field = session.query(models.Field).filter(models.Field.id == id).one_or_none()
     if field.fieldgroup_id is not None:
         yield field.fieldgroup_id
-        yield fieldtree_ancestors(store, field.fieldgroup_id)
+        yield fieldtree_ancestors(session, field.fieldgroup_id)
 
 
-@transact_ro
-def get_fieldtemplate_list(store, language, request_type=None):
+@transact
+def get_fieldtemplate_list(session, tid, language):
     """
     Serialize all the field templates localizing their content depending on the language.
 
-    :param store: the store on which perform queries.
+    :param session: the session on which perform queries.
     :param language: the language of the field definition dict
     :return: the current field list serialized.
     :rtype: list of dict
     """
-    language  = language if request_type != 'export' else None
+    templates = session.query(models.Field).filter(models.Field.tid.in_(set([1, tid])),
+                                                   models.Field.instance == u'template',
+                                                   models.Field.fieldgroup_id == None)
 
-    ret = []
-    for f in store.find(models.Field, models.Field.instance == u'template'):
-        if f.fieldgroup is None:
-            ret.append(serialize_field(store, f, language))
-
-    return ret
+    return [serialize_field(session, tid, f, language) for f in templates]
 
 
 class FieldTemplatesCollection(BaseHandler):
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
+    check_roles = 'admin'
+    cache_resource = True
+    invalidate_cache = True
+
     def get(self):
         """
         Return a list of all the fields templates available.
@@ -423,115 +300,72 @@ class FieldTemplatesCollection(BaseHandler):
         :return: the list of field templates registered on the node.
         :rtype: list
         """
-        response = yield GLApiCache.get('fieldtemplates', self.request.language,
-                                        get_fieldtemplate_list, self.request.language, self.request.request_type)
+        return get_fieldtemplate_list(self.request.tid, self.request.language)
 
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def post(self):
         """
         Create a new field template.
         """
         validator = requests.AdminFieldDesc if self.request.language is not None else requests.AdminFieldDescRaw
 
-        request = self.validate_message(self.request.body, validator)
+        request = self.validate_message(self.request.content.read(), validator)
 
-        response = yield create_field(request, self.request.language, self.request.request_type)
-
-        self.set_status(201)
-        self.write(response)
+        return create_field(self.request.tid, request, self.request.language)
 
 
 class FieldTemplateInstance(BaseHandler):
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
-    def get(self, field_id):
-        """
-        Get the field identified by field_id
+    check_roles = 'admin'
+    invalidate_cache = True
 
-        :param field_id:
-        :rtype: FieldTemplateDesc
-        :raises FieldIdNotFound: if there is no field with such id.
-        :raises InvalidInputFormat: if validation fails.
-        """
-        response = yield get_field(field_id,
-                                   self.request.language,
-                                   self.request.request_type)
-
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def put(self, field_id):
         """
         Update a single field template's attributes.
 
         :param field_id:
         :rtype: FieldTemplateDesc
-        :raises FieldIdNotFound: if there is no field with such id.
-        :raises InvalidInputFormat: if validation fails.
+        :raises InputValidationError: if validation fails.
         """
-        request = self.validate_message(self.request.body,
+        request = self.validate_message(self.request.content.read(),
                                         requests.AdminFieldDesc)
 
-        response = yield update_field(field_id,
-                                      request,
-                                      self.request.language,
-                                      self.request.request_type)
+        return update_field(self.request.tid,
+                            field_id,
+                            request,
+                            self.request.language)
 
-        GLApiCache.invalidate()
-
-        self.set_status(202) # Updated
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def delete(self, field_id):
         """
         Delete a single field template.
 
         :param field_id:
-        :raises FieldIdNotFound: if there is no field with such id.
         """
-        yield delete_field(field_id)
-
-        GLApiCache.invalidate()
+        return delete_field(self.request.tid, field_id)
 
 
-class FieldCollection(BaseHandler):
+class FieldsCollection(BaseHandler):
     """
     Operation to create a field
 
     /admin/fields
     """
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
+    check_roles = 'admin'
+    cache_resource = True
+    invalidate_cache = True
+
     def post(self):
         """
         Create a new field.
 
         :return: the serialized field
         :rtype: AdminFieldDesc
-        :raises InvalidInputFormat: if validation fails.
+        :raises InputValidationError: if validation fails.
         """
-        request = self.validate_message(self.request.body,
+        request = self.validate_message(self.request.content.read(),
                                         requests.AdminFieldDesc)
 
-        response = yield create_field(request,
-                                      self.request.language,
-                                      self.request.request_type)
-
-        GLApiCache.invalidate()
-
-        self.set_status(201)
-        self.write(response)
+        return create_field(self.request.tid,
+                            request,
+                            self.request.language)
 
 
 class FieldInstance(BaseHandler):
@@ -540,30 +374,9 @@ class FieldInstance(BaseHandler):
 
     /admin/fields
     """
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
-    def get(self, field_id):
-        """
-        Get the field identified by field_id
+    check_roles = 'admin'
+    invalidate_cache = True
 
-        :param field_id:
-        :return: the serialized field
-        :rtype: AdminFieldDesc
-        :raises FieldIdNotFound: if there is no field with such id.
-        :raises InvalidInputFormat: if validation fails.
-        """
-        response = yield get_field(field_id,
-                                   self.request.language,
-                                   self.request.request_type)
-
-        GLApiCache.invalidate()
-
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def put(self, field_id):
         """
         Update attributes of the specified step.
@@ -571,33 +384,21 @@ class FieldInstance(BaseHandler):
         :param field_id:
         :return: the serialized field
         :rtype: AdminFieldDesc
-        :raises FieldIdNotFound: if there is no field with such id.
-        :raises InvalidInputFormat: if validation fails.
+        :raises InputValidationError: if validation fails.
         """
-        request = self.validate_message(self.request.body,
+        request = self.validate_message(self.request.content.read(),
                                         requests.AdminFieldDesc)
 
-        response = yield update_field(field_id,
-                                      request,
-                                      self.request.language,
-                                      self.request.request_type)
+        return update_field(self.request.tid,
+                            field_id,
+                            request,
+                            self.request.language)
 
-        GLApiCache.invalidate()
-
-        self.set_status(202) # Updated
-        self.write(response)
-
-    @BaseHandler.transport_security_check('admin')
-    @BaseHandler.authenticated('admin')
-    @inlineCallbacks
     def delete(self, field_id):
         """
         Delete a single field.
 
         :param field_id:
-        :raises FieldIdNotFound: if there is no field with such id.
-        :raises InvalidInputFormat: if validation fails.
+        :raises InputValidationError: if validation fails.
         """
-        yield delete_field(field_id)
-
-        GLApiCache.invalidate()
+        return delete_field(self.request.tid, field_id)

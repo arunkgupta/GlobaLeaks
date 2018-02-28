@@ -1,10 +1,7 @@
 {
   "version": 1,
   "node": {
-    "footer": {
-      "en": "proudly powered by GlobaLeaks, copyright by Hermes Center for Transparency and Digital Human Rights"
-    },
-    "context_clarification": {
+    "contexts_clarification": {
       "en": "Select the context of your submission:"
     },
     "security_awareness_title": {
@@ -29,7 +26,7 @@
       "en": "Your submission was successful."
     },
     "header_title_tippage": {
-      "en": "Tip status page"
+      "en": "Submission status"
     },
     "widget_comments_title": {
       "en": "Comments"
@@ -38,81 +35,8 @@
       "en": "Private messages"
     },
     "widget_files_title": {
-      "en": "Files"
+      "en": "Attachments"
     }
   },
-  "default_questionnaire" : {
-    "key": "default",
-    "name": "Default",
-    "editable": false,
-    "layout": "horizontal",
-    "show_steps_navigation_bar": true,
-    "steps_navigation_requires_completion": false,
-    "steps": [
-      {
-        "label": { "en": "Fill out your submission" },
-        "description": {"en": ""},
-        "presentation_order": 0,
-        "children" : [
-          {
-            "label": { "en": "Short title" },
-            "type": "inputbox",
-            "preview": true,
-            "hint": {"en": "Describe your submission in a few words"},
-            "description": {"en": ""},
-            "multi_entry": false,
-            "multi_entry_hint": {"en": ""},
-            "stats_enabled": false,
-            "required": false,
-            "attrs": {
-              "min_len": {"type": "int", "value": "-1"},
-              "max_len": {"type": "int", "value": "-1"},
-              "input_validation": {"type": "unicode", "value": "none"},
-              "regexp": {"type": "unicode", "value": ""}
-            },
-            "options": [],
-            "children": [],
-            "y": 1,
-            "x": 0
-          },
-          {
-            "label": { "en": "Full description" },
-            "type": "textarea",
-            "preview": false,
-            "hint": {"en": "Describe your submission in detail"},
-            "description": {"en": ""},
-            "multi_entry": false,
-            "multi_entry_hint": {"en": ""},
-            "stats_enabled": false,
-            "required": false,
-            "attrs": {
-              "min_len": {"type": "int", "value": "-1"},
-              "max_len": {"type": "int", "value": "-1"}
-            },
-            "options": [],
-            "children": [],
-            "y": 2,
-            "x": 0
-          },
-          {
-            "label": { "en": "Files" },
-            "type": "fileupload",
-            "preview": false,
-            "hint": {"en": "Attach files relevant to the submission"},
-            "description": {"en": ""},
-            "multi_entry": true,
-            "multi_entry_hint": {"en": ""},
-            "stats_enabled": false,
-            "required": false,
-            "attrs": {},
-            "options": [],
-            "children": [],
-            "y": 3,
-            "x": 0
-          }
-        ]
-      }]
-  },
-  "templates" : {
-  }
+  "templates" : {}
 }
